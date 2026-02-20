@@ -1,0 +1,26 @@
+Quality what-if report
+Generated at (UTC): 2026-01-04T22:46:36.405839+00:00
+
+Market: 1X2
+baseline:
+  bets=44 roi=9.30% clv_avg=-0.05% clv_cov=34.09% brier=0.229 logloss=0.651
+scenario: exclude league_id 39 (Premier League)
+  bets=28 roi=29.89% clv_avg=0.00% clv_cov=17.86% brier=0.240 logloss=0.674
+  delta_vs_baseline: roi=20.60% clv_avg=0.05% bets=-16
+scenario: exclude odds bucket 2.0-2.99
+  bets=22 roi=30.23% clv_avg=0.00% clv_cov=27.27% brier=0.242 logloss=0.677
+  delta_vs_baseline: roi=20.93% clv_avg=0.05% bets=-22
+
+Market: TOTAL
+baseline:
+  bets=86 roi=7.49% clv_avg=-1.19% clv_cov=69.77% brier=0.251 logloss=0.695
+scenario: exclude league_id 94 and 140 (Primeira, La Liga)
+  bets=63 roi=22.81% clv_avg=-0.25% clv_cov=66.67% brier=0.234 logloss=0.659
+  delta_vs_baseline: roi=15.32% clv_avg=0.94% bets=-23
+scenario: exclude odds bucket 2.0-2.99
+  bets=49 roi=7.63% clv_avg=-0.47% clv_cov=65.31% brier=0.236 logloss=0.664
+  delta_vs_baseline: roi=0.14% clv_avg=0.72% bets=-37
+
+Notes:
+- Small samples can move ROI/CLV a lot; treat deltas as directional only.
+- CLV is based on last pre-kickoff snapshot for the configured bookmaker.

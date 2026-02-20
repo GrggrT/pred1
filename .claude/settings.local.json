@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_status_mapping.py -v)",
+      "Bash(python3 -m pytest tests/test_status_mapping.py -v)",
+      "Bash(source:*)",
+      "Bash(python:*)",
+      "Bash(docker compose exec:*)",
+      "Bash(docker compose:*)",
+      "Bash(curl:*)",
+      "Bash(docker logs:*)",
+      "Bash(python3:*)",
+      "Bash(docker-compose down:*)",
+      "Bash(docker-compose build:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker-compose restart:*)",
+      "Bash(docker-compose stop:*)",
+      "Bash(docker-compose start:*)",
+      "Bash(docker-compose exec scheduler grep:*)",
+      "Bash(docker-compose exec:*)",
+      "Bash(docker system prune:*)",
+      "Bash(docker image prune:*)",
+      "Bash(docker volume prune:*)",
+      "Bash(docker-compose:*)",
+      "Bash(docker ps:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

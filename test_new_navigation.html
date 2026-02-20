@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Navigation Test - Football Value Betting</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            margin: 0;
+            background: #0d1117;
+            color: #e6edf3;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        }
+        .test-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        .test-preview {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .feature-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin-top: 24px;
+        }
+        .feature-item {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .feature-title {
+            color: #58a6ff;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .feature-desc {
+            color: #8b949e;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .url-box {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 16px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            color: #58a6ff;
+        }
+        .status-badge {
+            display: inline-block;
+            background: #238636;
+            color: #ffffff;
+            padding: 4px 8px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🚀 Navigation Enhancement Complete</h1>
+
+        <div class="test-preview">
+            <h2>✨ Major Design System Improvements</h2>
+            <p>Полная реструктуризация навигации и дизайн-системы завершена. Проект теперь имеет современную архитектуру и единую систему дизайна.</p>
+
+            <div class="status-badge">✅ READY FOR TESTING</div>
+        </div>
+
+        <div class="feature-list">
+            <div class="feature-item">
+                <div class="feature-title">🎨 Unified Design System</div>
+                <div class="feature-desc">
+                    CSS Custom Properties для spacing, typography, colors, semantic tokens с поддержкой светлой/темной темы
+                </div>
+            </div>
+
+            <div class="feature-item">
+                <div class="feature-title">🗂️ Grouped Navigation</div>
+                <div class="feature-desc">
+                    Overview (Dashboard, Live Control), Analysis (History & ROI), Operations (Jobs & Tasks, Database) с современными иконками и badges
+                </div>
+            </div>
+
+            <div class="feature-item">
+                <div class="feature-title">🌙 Theme Toggle</div>
+                <div class="feature-desc">
+                    Переключение светлой/темной темы с сохранением в localStorage и плавными анимациями
+                </div>
+            </div>
+
+            <div class="feature-item">
+                <div class="feature-title">📊 Status Indicators</div>
+                <div class="feature-desc">
+                    Live indicators, connection status, animated badges и современный footer с статусом подключения
+                </div>
+            </div>
+
+            <div class="feature-item">
+                <div class="feature-title">🎯 Enhanced UX</div>
+                <div class="feature-desc">
+                    Hover effects, smooth transitions, улучшенная читаемость и интуитивная группировка функций
+                </div>
+            </div>
+
+            <div class="feature-item">
+                <div class="feature-title">🔧 Modern Architecture</div>
+                <div class="feature-desc">
+                    Компонентный подход, семантические CSS токены, масштабируемая структура для будущих улучшений
+                </div>
+            </div>
+        </div>
+
+        <div class="url-box">
+            <strong>Тестовый URL:</strong> <a href="http://localhost:8000" style="color: #58a6ff;">http://localhost:8000</a>
+        </div>
+
+        <div class="test-preview">
+            <h3>🔍 Как протестировать:</h3>
+            <ol style="color: #8b949e; line-height: 1.6;">
+                <li>Откройте <strong>http://localhost:8000</strong> в браузере</li>
+                <li>Введите admin token: <strong>dev</strong></li>
+                <li>Протестируйте новую навигацию с группами разделов</li>
+                <li>Переключите тему кнопкой в правом верхнем углу brand section</li>
+                <li>Обратите внимание на LIVE indicator с пульсирующей анимацией</li>
+                <li>Проверьте status footer с индикатором подключения</li>
+                <li>Hover effects и smooth transitions при переключении разделов</li>
+            </ol>
+        </div>
+
+        <div class="test-preview">
+            <h3>🎯 Следующие шаги:</h3>
+            <p style="color: #8b949e;">
+                1. <strong>Unified Dashboard</strong> - создание обобщенной главной страницы с ключевыми метриками<br>
+                2. <strong>Component Library</strong> - стандартизация UI компонентов для consistency<br>
+                3. <strong>Advanced Theming</strong> - расширение темной темы на все компоненты
+            </p>
+        </div>
+
+        <script>
+            // Auto-check server status
+            setTimeout(() => {
+                fetch('http://localhost:8000/health')
+                    .then(() => {
+                        document.body.style.background = 'linear-gradient(135deg, #0d1117 0%, #1a1f2b 100%)';
+                        document.querySelector('.test-container').insertAdjacentHTML('beforeend',
+                            '<div style="text-align: center; margin-top: 24px; color: #238636; font-weight: 600;">✅ Server is running and ready for testing!</div>'
+                        );
+                    })
+                    .catch(() => {
+                        document.querySelector('.test-container').insertAdjacentHTML('beforeend',
+                            '<div style="text-align: center; margin-top: 24px; color: #da3633; font-weight: 600;">❌ Server not responding. Run: docker compose up -d app</div>'
+                        );
+                    });
+            }, 1000);
+        </script>
+    </div>
+</body>
+</html>

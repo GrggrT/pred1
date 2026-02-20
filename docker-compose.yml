@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fc_mvp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    environment:
+      SCHEDULER_ENABLED: "false"
+      SNAPSHOT_AUTOFILL_ENABLED: "false"
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+  
+  scheduler:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - db
+    environment:
+      SCHEDULER_ENABLED: "true"
+    command: >
+      python -m app.scheduler_runner
+
+volumes:
+  pgdata:

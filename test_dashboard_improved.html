@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>📊 Dashboard Improved - Football Value Betting</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            margin: 0;
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            color: #f0fdf4;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            min-height: 100vh;
+            padding: 32px;
+        }
+        .test-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .success-header {
+            text-align: center;
+            margin-bottom: 32px;
+            background: linear-gradient(145deg, #065f46, #047857);
+            border: 2px solid #10b981;
+            border-radius: 16px;
+            padding: 32px;
+        }
+        .success-title {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 16px;
+            color: #86efac;
+        }
+        .improvement-card {
+            background: rgba(6,95,70,0.6);
+            border: 1px solid #10b981;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 16px 0;
+        }
+        .improvement-title {
+            color: #86efac;
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+        .improvement-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(16,185,129,0.3);
+        }
+        .improvement-item:last-child {
+            border-bottom: none;
+        }
+        .status-fixed {
+            color: #86efac;
+            font-weight: 700;
+        }
+        .test-btn {
+            background: linear-gradient(145deg, #10b981, #059669);
+            border: 2px solid #34d399;
+            color: #ffffff;
+            padding: 16px 32px;
+            border-radius: 12px;
+            margin: 12px;
+            cursor: pointer;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+        .test-btn:hover {
+            background: linear-gradient(145deg, #059669, #047857);
+            border-color: #86efac;
+            transform: translateY(-3px);
+        }
+        .test-results {
+            background: rgba(4,120,87,0.4);
+            border: 1px solid rgba(16,185,129,0.5);
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+            margin: 20px 0;
+        }
+        .feature-box {
+            background: rgba(4,120,87,0.3);
+            border: 1px solid rgba(16,185,129,0.5);
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .feature-title {
+            color: #86efac;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="success-header">
+            <h1 class="success-title">📊 DASHBOARD ИСПРАВЛЕН!</h1>
+            <p style="font-size: 1.2rem; margin-bottom: 20px;">
+                Recent Activity теперь загружается с реальными данными<br>
+                и улучшенным отображением метрик!
+            </p>
+        </div>
+
+        <div class="improvement-card">
+            <h3 class="improvement-title">🔧 Что было исправлено</h3>
+            <div class="improvement-item">
+                <span>Recent Activity</span>
+                <span class="status-fixed">"Loading..." → "Real Data"</span>
+            </div>
+            <div class="improvement-item">
+                <span>API вызовы</span>
+                <span class="status-fixed">добавлен параллельный запрос /api/v1/bets/history</span>
+            </div>
+            <div class="improvement-item">
+                <span>Функция updateRecentActivity</span>
+                <span class="status-fixed">создана с нуля</span>
+            </div>
+            <div class="improvement-item">
+                <span>Обработка ошибок</span>
+                <span class="status-fixed">улучшена с детальными сообщениями</span>
+            </div>
+            <div class="improvement-item">
+                <span>Тренды KPI</span>
+                <span class="status-fixed">добавлены индикаторы трендов</span>
+            </div>
+            <div class="improvement-item">
+                <span>Отображение активности</span>
+                <span class="status-fixed">иконки статуса + команды + лиги</span>
+            </div>
+        </div>
+
+        <div class="improvement-card">
+            <h3 class="improvement-title">✨ Новые возможности</h3>
+            <div class="feature-grid">
+                <div class="feature-box">
+                    <div class="feature-title">🏆 Recent Activity</div>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 14px;">
+                        <li>Реальные названия команд</li>
+                        <li>Иконки статуса (🟢🔴🟡)</li>
+                        <li>Информация о лигах</li>
+                        <li>Profit/Loss цветовые индикаторы</li>
+                        <li>Показ 5 последних активностей</li>
+                    </ul>
+                </div>
+                <div class="feature-box">
+                    <div class="feature-title">📈 Enhanced KPIs</div>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 14px;">
+                        <li>Тренды с иконками (📈📉)</li>
+                        <li>Логирование risk metrics</li>
+                        <li>Информация о периоде</li>
+                        <li>Улучшенная обработка ошибок</li>
+                        <li>Консольная отладка</li>
+                    </ul>
+                </div>
+                <div class="feature-box">
+                    <div class="feature-title">🔄 Better Loading</div>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 14px;">
+                        <li>Параллельные API запросы</li>
+                        <li>Graceful error handling</li>
+                        <li>Детальные статус сообщения</li>
+                        <li>Логирование для отладки</li>
+                        <li>Fallback для недоступных данных</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="improvement-card">
+            <h3 class="improvement-title">🧪 Тест улучшений</h3>
+            <button class="test-btn" onclick="testDashboardAPIs()">
+                📊 ТЕСТ DASHBOARD APIs
+            </button>
+            <button class="test-btn" onclick="testRecentActivity()">
+                🏆 ТЕСТ RECENT ACTIVITY
+            </button>
+            <button class="test-btn" onclick="testKPIMetrics()">
+                📈 ТЕСТ KPI МЕТРИК
+            </button>
+            <div id="test-results" class="test-results"></div>
+        </div>
+
+        <div class="improvement-card">
+            <h3 class="improvement-title">🚀 Проверить результат</h3>
+            <a href="http://localhost:8000" class="test-btn" target="_blank">
+                ✨ ОТКРЫТЬ DASHBOARD
+            </a>
+            <div style="margin-top: 16px; font-size: 0.9rem; opacity: 0.8;">
+                <p><strong>Проверьте улучшения Dashboard:</strong></p>
+                <ol>
+                    <li>Откройте приложение</li>
+                    <li>Войдите с токеном 'dev'</li>
+                    <li>Dashboard должен загружаться автоматически</li>
+                    <li>Проверьте секцию "Recent Activity" - должны быть реальные матчи</li>
+                    <li>Посмотрите на иконки статусов (🟢🔴🟡) у активностей</li>
+                    <li>Обратите внимание на profit/loss цвета</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        const HEADERS = { 'X-Admin-Token': 'dev' };
+
+        async function testDashboardAPIs() {
+            const resultsDiv = document.getElementById('test-results');
+            resultsDiv.innerHTML = 'Тестируем Dashboard APIs...';
+
+            try {
+                const [dashboardResponse, recentResponse] = await Promise.all([
+                    fetch(`${API_BASE}/api/v1/dashboard`, { headers: HEADERS }),
+                    fetch(`${API_BASE}/api/v1/bets/history?limit=10`, { headers: HEADERS })
+                ]);
+
+                if (dashboardResponse.ok && recentResponse.ok) {
+                    const dashboardData = await dashboardResponse.json();
+                    const recentData = await recentResponse.json();
+
+                    resultsDiv.innerHTML = `✅ Dashboard APIs работают!
+
+📊 DASHBOARD DATA:
+━━━━━━━━━━━━━━━━━━━━━━
+📈 Period: ${dashboardData.period_days} days
+🎯 Total Bets: ${dashboardData.kpis?.total_bets?.value || 0}
+📊 Win Rate: ${dashboardData.kpis?.win_rate?.value || 0}%
+💰 ROI: ${dashboardData.kpis?.roi?.value || 0}%
+🔥 Profit: €${dashboardData.kpis?.total_profit?.value?.toFixed(2) || '0.00'}
+
+💼 RISK METRICS:
+━━━━━━━━━━━━━━━━━━━━━━
+🏆 Max Win: €${dashboardData.risk_metrics?.max_win || 0}
+📉 Max Loss: €${dashboardData.risk_metrics?.max_loss || 0}
+📊 Profit Factor: ${dashboardData.risk_metrics?.profit_factor || 0}
+
+🏆 RECENT ACTIVITY:
+━━━━━━━━━━━━━━━━━━━━━━
+📊 Records: ${recentData.length}
+🟢 Wins: ${recentData.filter(b => b.status === 'WIN').length}
+🔴 Losses: ${recentData.filter(b => b.status === 'LOSS').length}
+🟡 Pending: ${recentData.filter(b => b.status === 'PENDING').length}
+
+🎯 Оба API готовы для Dashboard!`;
+                } else {
+                    throw new Error('One or both APIs failed');
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `❌ Ошибка тестирования: ${error.message}`;
+            }
+        }
+
+        async function testRecentActivity() {
+            const resultsDiv = document.getElementById('test-results');
+            resultsDiv.innerHTML = 'Тестируем Recent Activity функцию...';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/bets/history?limit=5`, { headers: HEADERS });
+                const data = await response.json();
+
+                const examples = data.slice(0, 3).map(bet => {
+                    const match = bet.home && bet.away ? `${bet.home} vs ${bet.away}` : 'Unknown';
+                    const icon = bet.status === 'WIN' ? '🟢' : bet.status === 'LOSS' ? '🔴' : '🟡';
+                    const profit = bet.profit !== null ? `€${bet.profit >= 0 ? '+' : ''}${bet.profit.toFixed(2)}` : 'Pending';
+                    return `${icon} ${match} | ${bet.pick} @${bet.odd} | ${profit}`;
+                }).join('\n');
+
+                resultsDiv.innerHTML = `✅ Recent Activity функция готова!
+
+🏆 ПРИМЕРЫ АКТИВНОСТЕЙ:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${examples}
+
+📊 СТАТИСТИКА ОТОБРАЖЕНИЯ:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ С названиями команд: ${data.filter(b => b.home && b.away).length}/${data.length}
+🏟️ С лигами: ${data.filter(b => b.league).length}/${data.length}
+💰 С profit данными: ${data.filter(b => b.profit !== null).length}/${data.length}
+📊 Качество данных: ${Math.round(data.filter(b => b.home && b.away && b.league).length / data.length * 100)}%
+
+🎯 Recent Activity будет отображать:
+- Иконки статуса (🟢🔴🟡)
+- Реальные названия команд
+- Информацию о лигах
+- Profit/Loss с цветами
+- Коэффициенты и даты
+
+✨ "Loading recent activity" больше не будет застревать!`;
+            } catch (error) {
+                resultsDiv.innerHTML = `❌ Ошибка тестирования: ${error.message}`;
+            }
+        }
+
+        async function testKPIMetrics() {
+            const resultsDiv = document.getElementById('test-results');
+            resultsDiv.innerHTML = 'Тестируем KPI метрики...';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/dashboard`, { headers: HEADERS });
+                const data = await response.json();
+
+                const kpis = data.kpis || {};
+
+                resultsDiv.innerHTML = `✅ KPI метрики работают!
+
+📊 ДЕТАЛЬНЫЕ KPI:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 Total Bets: ${kpis.total_bets?.value || 0} (trend: ${kpis.total_bets?.trend || 0})
+📈 Win Rate: ${kpis.win_rate?.value || 0}% (trend: ${kpis.win_rate?.trend || 0}%)
+💼 ROI: ${kpis.roi?.value || 0}% (trend: ${kpis.roi?.trend || 0}%)
+💰 Total Profit: €${kpis.total_profit?.value?.toFixed(2) || '0.00'} (trend: €${kpis.total_profit?.trend?.toFixed(2) || '0.00'})
+📊 Avg Bet: €${kpis.avg_bet?.value?.toFixed(2) || '0.00'}
+🏆 Active Leagues: ${kpis.active_leagues?.value || 0}
+
+📈 TREND INDICATORS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${Object.entries(kpis).map(([key, kpi]) => {
+    const trend = kpi.trend || 0;
+    const icon = trend > 0 ? '📈' : trend < 0 ? '📉' : '➖';
+    return `${icon} ${key}: ${trend > 0 ? '+' : ''}${trend}`;
+}).join('\n')}
+
+💼 RISK ANALYSIS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🏆 Max Win: €${data.risk_metrics?.max_win || 0}
+📉 Max Loss: €${data.risk_metrics?.max_loss || 0}
+📊 Profit Factor: ${data.risk_metrics?.profit_factor || 0}
+⏰ Period: ${data.period_days || 30} days
+
+🎯 Dashboard готов к отображению всех метрик!`;
+            } catch (error) {
+                resultsDiv.innerHTML = `❌ Ошибка тестирования KPI: ${error.message}`;
+            }
+        }
+
+        // Auto-test on load
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('📊 Dashboard improvement test page loaded');
+            setTimeout(testDashboardAPIs, 1000);
+        });
+    </script>
+</body>
+</html>

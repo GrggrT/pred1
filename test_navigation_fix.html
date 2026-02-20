@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🔧 Navigation Fix Test - Football Value Betting</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            margin: 0;
+            background: linear-gradient(135deg, #0d1117 0%, #1a1f2b 100%);
+            color: #e6edf3;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            min-height: 100vh;
+            padding: 32px;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .hero {
+            text-align: center;
+            margin-bottom: 48px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+        }
+        .hero-title {
+            font-size: 2rem;
+            color: #22c55e;
+            margin-bottom: 16px;
+        }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+        .status-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .status-title {
+            color: #58a6ff;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #30363d;
+        }
+        .status-item:last-child {
+            border-bottom: none;
+        }
+        .status-good { color: #22c55e; }
+        .status-bad { color: #ef4444; }
+        .status-warning { color: #f59e0b; }
+        .test-buttons {
+            text-align: center;
+            margin: 32px 0;
+        }
+        .test-btn {
+            background: #2563eb;
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            margin: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .test-btn:hover {
+            background: #1d4ed8;
+        }
+        .instructions {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .instructions h3 {
+            color: #58a6ff;
+            margin-top: 0;
+        }
+        .fix-summary {
+            background: #0f1419;
+            border: 1px solid #22c55e;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 24px 0;
+        }
+        .fix-summary h3 {
+            color: #22c55e;
+            margin-top: 0;
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="hero">
+            <h1 class="hero-title">🔧 Navigation System Fixed!</h1>
+            <p>Критические ошибки навигации устранены. Система теперь функциональна.</p>
+        </div>
+
+        <div class="status-grid">
+            <div class="status-card">
+                <h3 class="status-title">🐛 Найденные проблемы</h3>
+                <div class="status-item">
+                    <span>Отсутствующие event listeners</span>
+                    <span class="status-bad">❌ КРИТИЧНО</span>
+                </div>
+                <div class="status-item">
+                    <span>Функция showSection не определена</span>
+                    <span class="status-bad">❌ КРИТИЧНО</span>
+                </div>
+                <div class="status-item">
+                    <span>Навигация не работала</span>
+                    <span class="status-bad">❌ КРИТИЧНО</span>
+                </div>
+                <div class="status-item">
+                    <span>Секции не переключались</span>
+                    <span class="status-bad">❌ КРИТИЧНО</span>
+                </div>
+            </div>
+
+            <div class="status-card">
+                <h3 class="status-title">✅ Исправления</h3>
+                <div class="status-item">
+                    <span>Core Navigation System</span>
+                    <span class="status-good">✅ ДОБАВЛЕНО</span>
+                </div>
+                <div class="status-item">
+                    <span>Event listeners для nav-item</span>
+                    <span class="status-good">✅ ДОБАВЛЕНО</span>
+                </div>
+                <div class="status-item">
+                    <span>showSection функция</span>
+                    <span class="status-good">✅ ДОБАВЛЕНО</span>
+                </div>
+                <div class="status-item">
+                    <span>Обработка ошибок</span>
+                    <span class="status-good">✅ ДОБАВЛЕНО</span>
+                </div>
+                <div class="status-item">
+                    <span>Мобильная поддержка</span>
+                    <span class="status-good">✅ ДОБАВЛЕНО</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="fix-summary">
+            <h3>🛠️ Что было исправлено</h3>
+            <ul>
+                <li><strong>Добавлена функция initializeCoreNavigation()</strong> - инициализирует обработчики навигации</li>
+                <li><strong>Добавлена функция showSection()</strong> - переключает между секциями приложения</li>
+                <li><strong>Добавлена функция handleNavigation()</strong> - обрабатывает клики по навигационным элементам</li>
+                <li><strong>Добавлена функция initializeSectionContent()</strong> - инициализирует контент секций</li>
+                <li><strong>Добавлены fallback функции</strong> - для секций без специальной логики</li>
+                <li><strong>Добавлена мобильная навигация</strong> - toggleSidebar для мобильных устройств</li>
+                <li><strong>Добавлена обработка ошибок</strong> - try/catch для всех критических функций</li>
+                <li><strong>Исправлены CSS стили</strong> - .section.active для корректного отображения</li>
+            </ul>
+        </div>
+
+        <div class="test-buttons">
+            <a href="http://localhost:8000" class="test-btn" target="_blank">
+                🚀 Тестировать главное приложение
+            </a>
+            <button class="test-btn" onclick="checkServerStatus()">
+                🔍 Проверить статус сервера
+            </button>
+        </div>
+
+        <div class="instructions">
+            <h3>📋 Как тестировать исправления</h3>
+            <ol>
+                <li>Откройте <a href="http://localhost:8000" style="color: #58a6ff;" target="_blank">главное приложение</a></li>
+                <li>Введите admin token: <strong>dev</strong></li>
+                <li>Проверьте навигацию в боковой панели:
+                    <ul>
+                        <li>📊 Dashboard - должен загружаться с KPI</li>
+                        <li>📺 Live Control - раздел live матчей</li>
+                        <li>📈 History & ROI - история ставок</li>
+                        <li>⚙️ Jobs & Tasks - управление задачами</li>
+                        <li>💾 Database - работа с данными</li>
+                        <li>🧩 Components - библиотека компонентов</li>
+                    </ul>
+                </li>
+                <li>Проверьте, что разделы переключаются корректно</li>
+                <li>Проверьте мобильную навигацию (кнопка ☰)</li>
+                <li>Откройте Developer Console - не должно быть JavaScript ошибок</li>
+            </ol>
+        </div>
+
+        <div id="status-result" style="margin-top: 24px;"></div>
+    </div>
+
+    <script>
+        async function checkServerStatus() {
+            const resultDiv = document.getElementById('status-result');
+            resultDiv.innerHTML = '<p>🔍 Проверяем сервер...</p>';
+
+            try {
+                const response = await fetch('http://localhost:8000/health');
+                if (response.ok) {
+                    const data = await response.json();
+                    resultDiv.innerHTML = `
+                        <div class="status-card">
+                            <h3 style="color: #22c55e;">✅ Сервер работает!</h3>
+                            <p>Status: ${JSON.stringify(data)}</p>
+                            <p>Приложение готово к тестированию.</p>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="status-card">
+                            <h3 style="color: #ef4444;">❌ Ошибка сервера</h3>
+                            <p>Status: ${response.status}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="status-card">
+                        <h3 style="color: #ef4444;">❌ Сервер недоступен</h3>
+                        <p>Error: ${error.message}</p>
+                        <p>Убедитесь, что Docker контейнер запущен: <code>docker compose up -d</code></p>
+                    </div>
+                `;
+            }
+        }
+
+        // Auto-check server status on page load
+        document.addEventListener('DOMContentLoaded', checkServerStatus);
+    </script>
+</body>
+</html>

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🎯 Real Data Only - Football Value Betting</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            margin: 0;
+            background: linear-gradient(135deg, #0d1117 0%, #1a1f2b 100%);
+            color: #e6edf3;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            min-height: 100vh;
+            padding: 32px;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .hero {
+            text-align: center;
+            margin-bottom: 48px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+        }
+        .hero-title {
+            font-size: 2rem;
+            color: #22c55e;
+            margin-bottom: 16px;
+        }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+        .status-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .status-card.success {
+            border-color: #22c55e;
+        }
+        .status-title {
+            color: #58a6ff;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #30363d;
+        }
+        .status-item:last-child {
+            border-bottom: none;
+        }
+        .status-good { color: #22c55e; }
+        .status-removed { color: #ef4444; }
+        .test-buttons {
+            text-align: center;
+            margin: 32px 0;
+        }
+        .test-btn {
+            background: #2563eb;
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            margin: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .test-btn:hover {
+            background: #1d4ed8;
+        }
+        .real-data-samples {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .real-data-samples h3 {
+            color: #22c55e;
+            margin-top: 0;
+        }
+        .data-sample {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 12px;
+            margin: 12px 0;
+            font-family: monospace;
+            font-size: 14px;
+            color: #c9d1d9;
+        }
+        .cleanup-summary {
+            background: #0f1419;
+            border: 1px solid #22c55e;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 24px 0;
+        }
+        .cleanup-summary h3 {
+            color: #22c55e;
+            margin-top: 0;
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="hero">
+            <h1 class="hero-title">🎯 Real Data Only Implementation Complete!</h1>
+            <p>Все моки удалены. Система работает исключительно с real production data.</p>
+        </div>
+
+        <div class="status-grid">
+            <div class="status-card success">
+                <h3 class="status-title">🗑️ Removed Mock Functions</h3>
+                <div class="status-item">
+                    <span>generateHeatmapDayData()</span>
+                    <span class="status-removed">❌ REMOVED</span>
+                </div>
+                <div class="status-item">
+                    <span>Mock fallback logic</span>
+                    <span class="status-removed">❌ ELIMINATED</span>
+                </div>
+                <div class="status-item">
+                    <span>Sample data generation</span>
+                    <span class="status-removed">❌ DELETED</span>
+                </div>
+                <div class="status-item">
+                    <span>Random data generators</span>
+                    <span class="status-removed">❌ PURGED</span>
+                </div>
+            </div>
+
+            <div class="status-card success">
+                <h3 class="status-title">✅ Real Data Sources</h3>
+                <div class="status-item">
+                    <span>Heatmap data from /api/v1/bets/history</span>
+                    <span class="status-good">✅ LIVE</span>
+                </div>
+                <div class="status-item">
+                    <span>Dashboard KPIs from /api/v1/dashboard</span>
+                    <span class="status-good">✅ REAL-TIME</span>
+                </div>
+                <div class="status-item">
+                    <span>Betting history from database</span>
+                    <span class="status-good">✅ PRODUCTION</span>
+                </div>
+                <div class="status-item">
+                    <span>Live matches from API</span>
+                    <span class="status-good">✅ CURRENT</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="real-data-samples">
+            <h3>📊 Verified Real Data Samples</h3>
+            <p>Backend providing actual production data:</p>
+
+            <div class="data-sample">
+<strong>Daily Betting History (Last 7 Days):</strong>
+2025-12-06: profit=€10.62, bets=9
+2025-12-07: profit=€-5.20, bets=8
+2025-12-08: profit=€4.40, bets=2
+2025-12-12: profit=€2.05, bets=1
+2025-12-13: profit=€3.30, bets=9
+2025-12-14: profit=€-0.70, bets=7
+2025-12-15: profit=€1.85, bets=1
+            </div>
+
+            <div class="data-sample">
+<strong>Live Picks (Real Fixtures):</strong>
+- Fulham vs Nottingham Forest (2025-12-22)
+- Aston Villa vs Manchester United (2025-12-21)
+- Sassuolo vs Torino (2025-12-21)
+- Leeds vs Crystal Palace (2025-12-20)
+            </div>
+
+            <div class="data-sample">
+<strong>Dashboard KPIs (Current):</strong>
+Total Bets: 36 | Win Rate: 50.0% | ROI: 45.3%
+Total Profit: €16.32 | Active Leagues: 4
+            </div>
+        </div>
+
+        <div class="test-buttons">
+            <a href="http://localhost:8000" class="test-btn" target="_blank">
+                🎯 Test Real Data Only
+            </a>
+            <button class="test-btn" onclick="checkDataSources()">
+                🔍 Verify Data Sources
+            </button>
+        </div>
+
+        <div class="cleanup-summary">
+            <h3>🧹 Cleanup Complete</h3>
+            <ul>
+                <li><strong>Удалена функция generateHeatmapDayData()</strong> - больше не генерируется fake data</li>
+                <li><strong>Изменена логика heatmap</strong> - теперь использует только { profit: 0, bets: 0 } для missing dates</li>
+                <li><strong>Все данные из backend</strong> - heatmap строится исключительно из real betting history</li>
+                <li><strong>Нулевые дни отображаются корректно</strong> - дни без ставок показывают 0 profit/bets</li>
+                <li><strong>Production ready</strong> - система полностью готова для production без моков</li>
+            </ul>
+        </div>
+
+        <div id="verification-result" style="margin-top: 24px;"></div>
+    </div>
+
+    <script>
+        async function checkDataSources() {
+            const resultDiv = document.getElementById('verification-result');
+            resultDiv.innerHTML = '<p>🔍 Проверяем источники данных...</p>';
+
+            const checks = [
+                { name: 'Dashboard KPIs', url: '/api/v1/dashboard' },
+                { name: 'Betting History', url: '/api/v1/bets/history?limit=5' },
+                { name: 'Live Picks', url: '/api/v1/picks?limit=3' },
+                { name: 'Health Check', url: '/health' }
+            ];
+
+            let results = '<div class="status-card success"><h3 class="status-title">🔍 Data Source Verification</h3>';
+
+            for (const check of checks) {
+                try {
+                    const response = await fetch(check.url, {
+                        headers: { 'X-Admin-Token': 'dev' }
+                    });
+                    const isSuccess = response.ok;
+                    const status = isSuccess ? '<span class="status-good">✅ LIVE</span>' : '<span class="status-removed">❌ ERROR</span>';
+                    results += `<div class="status-item"><span>${check.name}</span>${status}</div>`;
+                } catch (error) {
+                    results += `<div class="status-item"><span>${check.name}</span><span class="status-removed">❌ OFFLINE</span></div>`;
+                }
+            }
+
+            results += '</div>';
+            resultDiv.innerHTML = results;
+        }
+
+        // Auto-verify data sources on page load
+        document.addEventListener('DOMContentLoaded', checkDataSources);
+    </script>
+</body>
+</html>

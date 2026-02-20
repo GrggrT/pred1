@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🔗 WebSocket Integration Complete - Football Value Betting</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            margin: 0;
+            background: linear-gradient(135deg, #0d1117 0%, #1a1f2b 100%);
+            color: #e6edf3;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            min-height: 100vh;
+        }
+        .test-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+        .hero-section {
+            text-align: center;
+            margin-bottom: 48px;
+            background: linear-gradient(145deg, #161b22, #21262d);
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 48px 32px;
+            position: relative;
+            overflow: hidden;
+        }
+        .hero-section::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(34,197,94,0.1) 0%, transparent 70%);
+            animation: rotate 20s linear infinite;
+        }
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .hero-content {
+            position: relative;
+            z-index: 1;
+        }
+        .hero-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #22c55e, #10b981);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: #8b949e;
+            margin-bottom: 32px;
+            line-height: 1.6;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #22c55e;
+            color: #ffffff;
+            padding: 12px 24px;
+            border-radius: 24px;
+            font-weight: 600;
+            font-size: 14px;
+            animation: pulse 2s infinite;
+        }
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: #ffffff;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+            margin-bottom: 48px;
+        }
+        .feature-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            transition: all 0.3s ease;
+        }
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: #22c55e;
+            box-shadow: 0 8px 32px rgba(34,197,94,0.2);
+        }
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 16px;
+        }
+        .feature-title {
+            color: #22c55e;
+            font-weight: 600;
+            font-size: 1.25rem;
+            margin-bottom: 12px;
+        }
+        .feature-desc {
+            color: #8b949e;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .feature-list li {
+            padding: 4px 0;
+            color: #c9d1d9;
+            position: relative;
+            padding-left: 20px;
+        }
+        .feature-list li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: #22c55e;
+            font-weight: bold;
+        }
+        .url-section {
+            background: #0d1117;
+            border: 2px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 32px 0;
+            text-align: center;
+        }
+        .url-label {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #22c55e;
+            margin-bottom: 16px;
+        }
+        .url-link {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 1.5rem;
+            color: #22c55e;
+            text-decoration: none;
+            padding: 16px 24px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+        .url-link:hover {
+            background: #21262d;
+            border-color: #22c55e;
+            box-shadow: 0 0 20px rgba(34,197,94,0.3);
+        }
+        .instructions-section {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 32px;
+        }
+        .instructions-title {
+            color: #22c55e;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .steps-list {
+            counter-reset: step-counter;
+            list-style: none;
+            padding: 0;
+        }
+        .steps-list li {
+            counter-increment: step-counter;
+            margin-bottom: 16px;
+            padding: 16px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            position: relative;
+            padding-left: 64px;
+        }
+        .steps-list li::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 16px;
+            top: 16px;
+            background: #22c55e;
+            color: #0d1117;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        .step-highlight {
+            background: #22c55e;
+            color: #ffffff;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .next-steps {
+            background: linear-gradient(145deg, #161b22, #21262d);
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+        }
+        .next-title {
+            color: #58a6ff;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+        .next-item {
+            padding: 12px 0;
+            border-bottom: 1px solid #30363d;
+            color: #c9d1d9;
+            line-height: 1.6;
+        }
+        .next-item:last-child {
+            border-bottom: none;
+        }
+        .highlight {
+            color: #22c55e;
+            font-weight: 600;
+        }
+        .server-status {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 16px;
+            min-width: 200px;
+            font-size: 14px;
+            z-index: 1000;
+        }
+        .server-status.online {
+            border-color: #238636;
+            background: rgba(35,134,54,0.1);
+        }
+        .server-status.offline {
+            border-color: #da3633;
+            background: rgba(218,54,51,0.1);
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="hero-section">
+            <div class="hero-content">
+                <h1 class="hero-title">🔗 WebSocket Integration Complete!</h1>
+                <p class="hero-subtitle">
+                    Real-time bidirectional communication с automatic fallback,<br>
+                    intelligent reconnection и seamless data streaming
+                </p>
+                <div class="status-badge">
+                    <div class="pulse-dot"></div>
+                    REAL-TIME SYSTEM ACTIVE
+                </div>
+            </div>
+        </div>
+
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🔗</div>
+                <h3 class="feature-title">WebSocket Connection Manager</h3>
+                <p class="feature-desc">Robust connection management с intelligent reconnection:</p>
+                <ul class="feature-list">
+                    <li>Automatic connection establishment</li>
+                    <li>Exponential backoff reconnection</li>
+                    <li>Heartbeat/ping-pong mechanism</li>
+                    <li>Connection health monitoring</li>
+                    <li>Page visibility API integration</li>
+                    <li>Queue system для offline messages</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">📡</div>
+                <h3 class="feature-title">Real-time Data Streaming</h3>
+                <p class="feature-desc">Instant data updates через WebSocket channels:</p>
+                <ul class="feature-list">
+                    <li>Dashboard KPI real-time updates</li>
+                    <li>Live matches streaming data</li>
+                    <li>Job status instant notifications</li>
+                    <li>System status broadcasts</li>
+                    <li>Bet updates с live odds</li>
+                    <li>Custom event subscription system</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🔄</div>
+                <h3 class="feature-title">Intelligent Fallback</h3>
+                <p class="feature-desc">Seamless transition между WebSocket и HTTP polling:</p>
+                <ul class="feature-list">
+                    <li>Automatic WebSocket detection</li>
+                    <li>HTTP polling fallback</li>
+                    <li>Connection status indicators</li>
+                    <li>User-transparent switching</li>
+                    <li>Performance optimization</li>
+                    <li>Bandwidth conservation</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🔔</div>
+                <h3 class="feature-title">Notification Integration</h3>
+                <p class="feature-desc">WebSocket-powered notification system:</p>
+                <ul class="feature-list">
+                    <li>Instant push notifications</li>
+                    <li>Priority-based alerts</li>
+                    <li>Contextual notifications</li>
+                    <li>Sound & visual feedback</li>
+                    <li>Smart notification grouping</li>
+                    <li>Cross-tab synchronization</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3 class="feature-title">Performance Optimized</h3>
+                <p class="feature-desc">Efficient real-time communication:</p>
+                <ul class="feature-list">
+                    <li>Minimal latency updates</li>
+                    <li>Reduced server load</li>
+                    <li>Battery-friendly mobile operation</li>
+                    <li>Bandwidth optimization</li>
+                    <li>Background operation support</li>
+                    <li>Memory leak prevention</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🛡️</div>
+                <h3 class="feature-title">Enterprise Reliability</h3>
+                <p class="feature-desc">Production-ready WebSocket implementation:</p>
+                <ul class="feature-list">
+                    <li>Token-based authentication</li>
+                    <li>SSL/WSS security support</li>
+                    <li>Error handling & recovery</li>
+                    <li>Connection limits & throttling</li>
+                    <li>Logging & monitoring integration</li>
+                    <li>Scalable architecture</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="url-section">
+            <div class="url-label">🔗 Test WebSocket Integration</div>
+            <a href="http://localhost:8000" target="_blank" class="url-link">
+                http://localhost:8000
+            </a>
+        </div>
+
+        <div class="instructions-section">
+            <h2 class="instructions-title">🧪 How to Test WebSocket Integration</h2>
+            <ol class="steps-list">
+                <li>
+                    Откройте <span class="step-highlight">http://localhost:8000</span> и введите token <span class="step-highlight">dev</span>
+                </li>
+                <li>
+                    Откройте <span class="step-highlight">Developer Console</span> (F12) для WebSocket logs
+                </li>
+                <li>
+                    В Dashboard включите <span class="step-highlight">Auto-refresh</span> (10s или 30s)
+                </li>
+                <li>
+                    Проверьте console logs: <span class="step-highlight">"🔗 WebSocket connected"</span>
+                </li>
+                <li>
+                    Наблюдайте <span class="step-highlight">"Using WebSocket mode"</span> в console
+                </li>
+                <li>
+                    Посмотрите на <span class="step-highlight">Connection Status</span> indicator (Live)
+                </li>
+                <li>
+                    Протестируйте <span class="step-highlight">Disconnect/Reconnect</span> - отключите интернет
+                </li>
+                <li>
+                    Проверьте <span class="step-highlight">Fallback to polling mode</span> в console
+                </li>
+                <li>
+                    Восстановите интернет и убедитесь в <span class="step-highlight">automatic reconnection</span>
+                </li>
+                <li>
+                    Переключитесь между <span class="step-highlight">вкладками</span> - WebSocket должен pause/resume
+                </li>
+                <li>
+                    Проверьте <span class="step-highlight">Connection Status Bar</span> вверху страницы
+                </li>
+                <li>
+                    Откройте <span class="step-highlight">Network tab</span> и убедитесь в WebSocket connection
+                </li>
+            </ol>
+        </div>
+
+        <div class="next-steps">
+            <h2 class="next-title">🚀 WebSocket Architecture</h2>
+            <div class="next-item">
+                <span class="highlight">Connection Manager:</span> Автоматическое управление соединением с exponential backoff и heartbeat monitoring
+            </div>
+            <div class="next-item">
+                <span class="highlight">Event System:</span> Pub/Sub архитектура с typed events для dashboard_update, live_matches, notifications
+            </div>
+            <div class="next-item">
+                <span class="highlight">Intelligent Fallback:</span> Seamless switching между WebSocket и HTTP polling на основе connection status
+            </div>
+            <div class="next-item">
+                <span class="highlight">Message Queuing:</span> Offline message queue с automatic replay при reconnection
+            </div>
+            <div class="next-item">
+                <span class="highlight">Integration Points:</span> Dashboard updates, live matches, job status, notifications с existing UI systems
+            </div>
+            <div class="next-item">
+                <span class="highlight">Performance Monitoring:</span> Connection uptime, message counts, error tracking для production monitoring
+            </div>
+        </div>
+    </div>
+
+    <div id="server-status" class="server-status">
+        <div id="status-text">Checking server...</div>
+    </div>
+
+    <script>
+        // Auto-check server status
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('http://localhost:8000/health');
+                if (response.ok) {
+                    const statusEl = document.getElementById('server-status');
+                    const textEl = document.getElementById('status-text');
+                    statusEl.className = 'server-status online';
+                    textEl.innerHTML = '✅ Server Online<br><small>WebSocket ready for testing!</small>';
+                } else {
+                    throw new Error('Server not responding');
+                }
+            } catch (error) {
+                const statusEl = document.getElementById('server-status');
+                const textEl = document.getElementById('status-text');
+                statusEl.className = 'server-status offline';
+                textEl.innerHTML = '❌ Server Offline<br><small>Run: docker compose up -d app</small>';
+            }
+        }
+
+        // Check status immediately and then every 10 seconds
+        checkServerStatus();
+        setInterval(checkServerStatus, 10000);
+    </script>
+</body>
+</html>

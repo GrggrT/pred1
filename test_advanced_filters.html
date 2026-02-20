@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🔍 Advanced Filters Complete - Football Value Betting</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            margin: 0;
+            background: linear-gradient(135deg, #0d1117 0%, #1a1f2b 100%);
+            color: #e6edf3;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            min-height: 100vh;
+        }
+        .test-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+        .hero-section {
+            text-align: center;
+            margin-bottom: 48px;
+            background: linear-gradient(145deg, #161b22, #21262d);
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 48px 32px;
+            position: relative;
+            overflow: hidden;
+        }
+        .hero-section::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(249,130,118,0.1) 0%, transparent 70%);
+            animation: rotate 25s linear infinite;
+        }
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .hero-content {
+            position: relative;
+            z-index: 1;
+        }
+        .hero-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #f97316, #58a6ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: #8b949e;
+            margin-bottom: 32px;
+            line-height: 1.6;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #f97316;
+            color: #ffffff;
+            padding: 12px 24px;
+            border-radius: 24px;
+            font-weight: 600;
+            font-size: 14px;
+            animation: pulse 2s infinite;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+            margin-bottom: 48px;
+        }
+        .feature-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            transition: all 0.3s ease;
+        }
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: #f97316;
+            box-shadow: 0 8px 32px rgba(249,115,22,0.2);
+        }
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 16px;
+        }
+        .feature-title {
+            color: #f97316;
+            font-weight: 600;
+            font-size: 1.25rem;
+            margin-bottom: 12px;
+        }
+        .feature-desc {
+            color: #8b949e;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .feature-list li {
+            padding: 4px 0;
+            color: #c9d1d9;
+            position: relative;
+            padding-left: 20px;
+        }
+        .feature-list li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: #238636;
+            font-weight: bold;
+        }
+        .url-section {
+            background: #0d1117;
+            border: 2px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 32px 0;
+            text-align: center;
+        }
+        .url-label {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #f97316;
+            margin-bottom: 16px;
+        }
+        .url-link {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 1.5rem;
+            color: #f97316;
+            text-decoration: none;
+            padding: 16px 24px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+        .url-link:hover {
+            background: #21262d;
+            border-color: #f97316;
+            box-shadow: 0 0 20px rgba(249,115,22,0.3);
+        }
+        .instructions-section {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 32px;
+        }
+        .instructions-title {
+            color: #f97316;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .steps-list {
+            counter-reset: step-counter;
+            list-style: none;
+            padding: 0;
+        }
+        .steps-list li {
+            counter-increment: step-counter;
+            margin-bottom: 16px;
+            padding: 16px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            position: relative;
+            padding-left: 64px;
+        }
+        .steps-list li::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 16px;
+            top: 16px;
+            background: #f97316;
+            color: #0d1117;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        .step-highlight {
+            background: #f97316;
+            color: #ffffff;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .next-steps {
+            background: linear-gradient(145deg, #161b22, #21262d);
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+        }
+        .next-title {
+            color: #58a6ff;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+        .next-item {
+            padding: 12px 0;
+            border-bottom: 1px solid #30363d;
+            color: #c9d1d9;
+            line-height: 1.6;
+        }
+        .next-item:last-child {
+            border-bottom: none;
+        }
+        .highlight {
+            color: #f97316;
+            font-weight: 600;
+        }
+        .server-status {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 16px;
+            min-width: 200px;
+            font-size: 14px;
+            z-index: 1000;
+        }
+        .server-status.online {
+            border-color: #238636;
+            background: rgba(35,134,54,0.1);
+        }
+        .server-status.offline {
+            border-color: #da3633;
+            background: rgba(218,54,51,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="hero-section">
+            <div class="hero-content">
+                <h1 class="hero-title">🔍 Advanced Filters Complete!</h1>
+                <p class="hero-subtitle">
+                    Sophisticated filtering system с real-time updates,<br>
+                    smart summarization и comprehensive data analysis
+                </p>
+                <div class="status-badge">
+                    ✅ ADVANCED FILTERING READY
+                </div>
+            </div>
+        </div>
+
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3 class="feature-title">Dashboard Filters</h3>
+                <p class="feature-desc">Comprehensive filtering для unified dashboard:</p>
+                <ul class="feature-list">
+                    <li>Date range picker с smart defaults</li>
+                    <li>ROI range filtering (min/max percentage)</li>
+                    <li>Profit range в Euro currency</li>
+                    <li>Bet types (Predictions vs Totals)</li>
+                    <li>Status filtering (Win/Loss/Pending/Void)</li>
+                    <li>Odds range с decimal precision</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3 class="feature-title">Real-time Filtering</h3>
+                <p class="feature-desc">Smart filtering с instant feedback:</p>
+                <ul class="feature-list">
+                    <li>Debounced input processing (300ms)</li>
+                    <li>Live filter summary tags</li>
+                    <li>Individual filter removal buttons</li>
+                    <li>Clear all filters functionality</li>
+                    <li>Loading states during data fetch</li>
+                    <li>Error handling с user feedback</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🎨</div>
+                <h3 class="feature-title">Advanced UI/UX</h3>
+                <p class="feature-desc">Professional filter interface:</p>
+                <ul class="feature-list">
+                    <li>Collapsible filter panel</li>
+                    <li>Responsive grid layout</li>
+                    <li>Focus states и accessibility</li>
+                    <li>CSS Custom Properties integration</li>
+                    <li>Smooth expand/collapse animations</li>
+                    <li>Mobile-optimized design</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🔗</div>
+                <h3 class="feature-title">API Integration</h3>
+                <p class="feature-desc">Backend integration с smart queries:</p>
+                <ul class="feature-list">
+                    <li>URLSearchParams construction</li>
+                    <li>Parallel API requests optimization</li>
+                    <li>Combined predictions + totals data</li>
+                    <li>Query parameter validation</li>
+                    <li>Fallback error handling</li>
+                    <li>Real data filtering</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">📈</div>
+                <h3 class="feature-title">Data Analytics</h3>
+                <p class="feature-desc">Intelligent data processing:</p>
+                <ul class="feature-list">
+                    <li>Multi-criteria filtering logic</li>
+                    <li>Performance metrics calculation</li>
+                    <li>Heatmap data filtering</li>
+                    <li>Recent results filtering</li>
+                    <li>KPI recalculation with filters</li>
+                    <li>Summary statistics updates</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🌐</div>
+                <h3 class="feature-title">Scalable Architecture</h3>
+                <p class="feature-desc">Extensible filtering framework:</p>
+                <ul class="feature-list">
+                    <li>Reusable filter components</li>
+                    <li>Modular JavaScript functions</li>
+                    <li>Extensible filter types</li>
+                    <li>Cross-section compatibility</li>
+                    <li>State management patterns</li>
+                    <li>Component library ready</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="url-section">
+            <div class="url-label">🔗 Test Advanced Filters</div>
+            <a href="http://localhost:8000" target="_blank" class="url-link">
+                http://localhost:8000
+            </a>
+        </div>
+
+        <div class="instructions-section">
+            <h2 class="instructions-title">🧪 How to Test Advanced Filters</h2>
+            <ol class="steps-list">
+                <li>
+                    Откройте <span class="step-highlight">http://localhost:8000</span> и введите token <span class="step-highlight">dev</span>
+                </li>
+                <li>
+                    В Dashboard найдите <span class="step-highlight">🔍 Advanced Filters</span> panel
+                </li>
+                <li>
+                    Нажмите <span class="step-highlight">Expand</span> чтобы открыть все фильтры
+                </li>
+                <li>
+                    Протестируйте <span class="step-highlight">Date Range</span> с custom dates
+                </li>
+                <li>
+                    Попробуйте <span class="step-highlight">ROI Range</span> filtering (например, 20% - 60%)
+                </li>
+                <li>
+                    Установите <span class="step-highlight">Profit Range</span> в Euro (например, €0 - €5)
+                </li>
+                <li>
+                    Переключите <span class="step-highlight">Bet Types</span> checkboxes
+                </li>
+                <li>
+                    Измените <span class="step-highlight">Status filters</span> (только Win или Loss)
+                </li>
+                <li>
+                    Установите <span class="step-highlight">Odds Range</span> (например, 1.5 - 3.0)
+                </li>
+                <li>
+                    Нажмите <span class="step-highlight">Apply Filters</span> и посмотрите на real-time updates
+                </li>
+                <li>
+                    Изучите <span class="step-highlight">filter summary tags</span> внизу panel'а
+                </li>
+                <li>
+                    Попробуйте <span class="step-highlight">удалить individual filters</span> кнопками ×
+                </li>
+                <li>
+                    Используйте <span class="step-highlight">Clear All</span> для reset всех фильтров
+                </li>
+            </ol>
+        </div>
+
+        <div class="next-steps">
+            <h2 class="next-title">🚀 Следующие этапы</h2>
+            <div class="next-item">
+                <span class="highlight">Live Section Filters:</span> Реализация фильтров для live matches (league, odds range, time filters)
+            </div>
+            <div class="next-item">
+                <span class="highlight">History Section Filters:</span> Advanced filtering для history analysis с complex queries
+            </div>
+            <div class="next-item">
+                <span class="highlight">Operations Filters:</span> Job status, error filtering, time range для operations section
+            </div>
+            <div class="next-item">
+                <span class="highlight">Real-time Updates:</span> WebSocket integration для live data updates без page refresh
+            </div>
+            <div class="next-item">
+                <span class="highlight">Smart Notifications:</span> Contextual alerts based на filtered data и performance thresholds
+            </div>
+        </div>
+    </div>
+
+    <div id="server-status" class="server-status">
+        <div id="status-text">Checking server...</div>
+    </div>
+
+    <script>
+        // Auto-check server status
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('http://localhost:8000/health');
+                if (response.ok) {
+                    const statusEl = document.getElementById('server-status');
+                    const textEl = document.getElementById('status-text');
+                    statusEl.className = 'server-status online';
+                    textEl.innerHTML = '✅ Server Online<br><small>Filters ready for testing!</small>';
+                } else {
+                    throw new Error('Server not responding');
+                }
+            } catch (error) {
+                const statusEl = document.getElementById('server-status');
+                const textEl = document.getElementById('status-text');
+                statusEl.className = 'server-status offline';
+                textEl.innerHTML = '❌ Server Offline<br><small>Run: docker compose up -d app</small>';
+            }
+        }
+
+        // Check status immediately and then every 10 seconds
+        checkServerStatus();
+        setInterval(checkServerStatus, 10000);
+    </script>
+</body>
+</html>

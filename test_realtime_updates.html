@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>⚡ Real-time Updates Complete - Football Value Betting</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            margin: 0;
+            background: linear-gradient(135deg, #0d1117 0%, #1a1f2b 100%);
+            color: #e6edf3;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            min-height: 100vh;
+        }
+        .test-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+        .hero-section {
+            text-align: center;
+            margin-bottom: 48px;
+            background: linear-gradient(145deg, #161b22, #21262d);
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 48px 32px;
+            position: relative;
+            overflow: hidden;
+        }
+        .hero-section::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(34,197,94,0.1) 0%, transparent 70%);
+            animation: rotate 15s linear infinite;
+        }
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .hero-content {
+            position: relative;
+            z-index: 1;
+        }
+        .hero-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #22c55e, #10b981);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: #8b949e;
+            margin-bottom: 32px;
+            line-height: 1.6;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #22c55e;
+            color: #ffffff;
+            padding: 12px 24px;
+            border-radius: 24px;
+            font-weight: 600;
+            font-size: 14px;
+            animation: pulse 2s infinite;
+        }
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: #ffffff;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+            margin-bottom: 48px;
+        }
+        .feature-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            transition: all 0.3s ease;
+        }
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: #22c55e;
+            box-shadow: 0 8px 32px rgba(34,197,94,0.2);
+        }
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 16px;
+        }
+        .feature-title {
+            color: #22c55e;
+            font-weight: 600;
+            font-size: 1.25rem;
+            margin-bottom: 12px;
+        }
+        .feature-desc {
+            color: #8b949e;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .feature-list li {
+            padding: 4px 0;
+            color: #c9d1d9;
+            position: relative;
+            padding-left: 20px;
+        }
+        .feature-list li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: #22c55e;
+            font-weight: bold;
+        }
+        .url-section {
+            background: #0d1117;
+            border: 2px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 32px 0;
+            text-align: center;
+        }
+        .url-label {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #22c55e;
+            margin-bottom: 16px;
+        }
+        .url-link {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 1.5rem;
+            color: #22c55e;
+            text-decoration: none;
+            padding: 16px 24px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+        .url-link:hover {
+            background: #21262d;
+            border-color: #22c55e;
+            box-shadow: 0 0 20px rgba(34,197,94,0.3);
+        }
+        .instructions-section {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 32px;
+        }
+        .instructions-title {
+            color: #22c55e;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .steps-list {
+            counter-reset: step-counter;
+            list-style: none;
+            padding: 0;
+        }
+        .steps-list li {
+            counter-increment: step-counter;
+            margin-bottom: 16px;
+            padding: 16px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            position: relative;
+            padding-left: 64px;
+        }
+        .steps-list li::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 16px;
+            top: 16px;
+            background: #22c55e;
+            color: #0d1117;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        .step-highlight {
+            background: #22c55e;
+            color: #ffffff;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .next-steps {
+            background: linear-gradient(145deg, #161b22, #21262d);
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+        }
+        .next-title {
+            color: #58a6ff;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+        .next-item {
+            padding: 12px 0;
+            border-bottom: 1px solid #30363d;
+            color: #c9d1d9;
+            line-height: 1.6;
+        }
+        .next-item:last-child {
+            border-bottom: none;
+        }
+        .highlight {
+            color: #22c55e;
+            font-weight: 600;
+        }
+        .server-status {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 16px;
+            min-width: 200px;
+            font-size: 14px;
+            z-index: 1000;
+        }
+        .server-status.online {
+            border-color: #22c55e;
+            background: rgba(34,197,94,0.1);
+        }
+        .server-status.offline {
+            border-color: #da3633;
+            background: rgba(218,54,51,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="hero-section">
+            <div class="hero-content">
+                <h1 class="hero-title">⚡ Real-time Updates Complete!</h1>
+                <p class="hero-subtitle">
+                    Live data streaming с smart intervals,<br>
+                    connection monitoring и seamless user experience
+                </p>
+                <div class="status-badge">
+                    <div class="pulse-dot"></div>
+                    LIVE SYSTEM ACTIVE
+                </div>
+            </div>
+        </div>
+
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🔄</div>
+                <h3 class="feature-title">Smart Auto-refresh</h3>
+                <p class="feature-desc">Intelligent refresh system с configurable intervals:</p>
+                <ul class="feature-list">
+                    <li>Interval selector (Off/10s/30s/1m/5m)</li>
+                    <li>Background updates без interruption</li>
+                    <li>Progress bar с visual countdown</li>
+                    <li>Page visibility API integration</li>
+                    <li>Connection retry logic</li>
+                    <li>Smart failure handling</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3 class="feature-title">Live Status Monitoring</h3>
+                <p class="feature-desc">Comprehensive connection и data monitoring:</p>
+                <ul class="feature-list">
+                    <li>Real-time connection status</li>
+                    <li>Visual status indicators (connected/updating/offline)</li>
+                    <li>Update counter tracking</li>
+                    <li>Last update timestamp</li>
+                    <li>Data freshness indicators</li>
+                    <li>Online/offline detection</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">💫</div>
+                <h3 class="feature-title">Visual Feedback</h3>
+                <p class="feature-desc">Rich animations и user feedback:</p>
+                <ul class="feature-list">
+                    <li>Flash animations для updated data</li>
+                    <li>Pulsing dots для live status</li>
+                    <li>Progress bar с smooth animations</li>
+                    <li>Update toasts с notifications</li>
+                    <li>Connection status bar</li>
+                    <li>Metric change indicators</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🔗</div>
+                <h3 class="feature-title">Seamless Integration</h3>
+                <p class="feature-desc">Full integration с existing features:</p>
+                <ul class="feature-list">
+                    <li>Advanced filters compatibility</li>
+                    <li>Dashboard data preservation</li>
+                    <li>Live matches updates</li>
+                    <li>Notifications integration</li>
+                    <li>Error handling с graceful degradation</li>
+                    <li>Legacy system compatibility</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3 class="feature-title">Performance Optimized</h3>
+                <p class="feature-desc">Efficient data updates и resource management:</p>
+                <ul class="feature-list">
+                    <li>Parallel API requests</li>
+                    <li>Data caching strategies</li>
+                    <li>Background processing</li>
+                    <li>Memory leak prevention</li>
+                    <li>Timer cleanup</li>
+                    <li>Optimized DOM updates</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🛡️</div>
+                <h3 class="feature-title">Robust Error Handling</h3>
+                <p class="feature-desc">Comprehensive error recovery и resilience:</p>
+                <ul class="feature-list">
+                    <li>Connection failure detection</li>
+                    <li>Automatic retry mechanisms</li>
+                    <li>Graceful degradation</li>
+                    <li>User notification system</li>
+                    <li>Timeout handling</li>
+                    <li>Recovery strategies</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="url-section">
+            <div class="url-label">⚡ Test Real-time Updates</div>
+            <a href="http://localhost:8000" target="_blank" class="url-link">
+                http://localhost:8000
+            </a>
+        </div>
+
+        <div class="instructions-section">
+            <h2 class="instructions-title">🧪 How to Test Real-time System</h2>
+            <ol class="steps-list">
+                <li>
+                    Откройте <span class="step-highlight">http://localhost:8000</span> и введите token <span class="step-highlight">dev</span>
+                </li>
+                <li>
+                    В Dashboard найдите <span class="step-highlight">Real-time Controls</span> panel сверху
+                </li>
+                <li>
+                    Проверьте <span class="step-highlight">Connection Status</span> с пульсирующим индикатором
+                </li>
+                <li>
+                    Протестируйте <span class="step-highlight">Auto-refresh intervals</span> (Off/10s/30s/1m/5m)
+                </li>
+                <li>
+                    Наблюдайте <span class="step-highlight">Progress Bar</span> с visual countdown
+                </li>
+                <li>
+                    Проверьте <span class="step-highlight">Update Counter</span> и последний timestamp
+                </li>
+                <li>
+                    Обратите внимание на <span class="step-highlight">Flash animations</span> при обновлении данных
+                </li>
+                <li>
+                    Протестируйте <span class="step-highlight">Page Visibility API</span> - switch к другой вкладке
+                </li>
+                <li>
+                    Симулируйте <span class="step-highlight">Connection Loss</span> (отключите интернет)
+                </li>
+                <li>
+                    Проверьте <span class="step-highlight">Update Toasts</span> в правом верхнем углу
+                </li>
+                <li>
+                    Убедитесь что <span class="step-highlight">Data Freshness</span> indicator работает правильно
+                </li>
+                <li>
+                    Протестируйте <span class="step-highlight">Error Recovery</span> после восстановления связи
+                </li>
+            </ol>
+        </div>
+
+        <div class="next-steps">
+            <h2 class="next-title">🚀 Следующие этапы</h2>
+            <div class="next-item">
+                <span class="highlight">WebSocket Integration:</span> Upgrade к WebSocket для true real-time messaging
+            </div>
+            <div class="next-item">
+                <span class="highlight">Smart Notifications:</span> Context-aware notification system с priority levels
+            </div>
+            <div class="next-item">
+                <span class="highlight">Component Library:</span> Reusable UI components для consistency across sections
+            </div>
+            <div class="next-item">
+                <span class="highlight">Advanced Monitoring:</span> Performance metrics и health dashboards
+            </div>
+            <div class="next-item">
+                <span class="highlight">Mobile Optimization:</span> Touch-friendly controls и responsive real-time UI
+            </div>
+        </div>
+    </div>
+
+    <div id="server-status" class="server-status">
+        <div id="status-text">Checking server...</div>
+    </div>
+
+    <script>
+        // Auto-check server status
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('http://localhost:8000/health');
+                if (response.ok) {
+                    const statusEl = document.getElementById('server-status');
+                    const textEl = document.getElementById('status-text');
+                    statusEl.className = 'server-status online';
+                    textEl.innerHTML = '✅ Server Online<br><small>Real-time system ready!</small>';
+                } else {
+                    throw new Error('Server not responding');
+                }
+            } catch (error) {
+                const statusEl = document.getElementById('server-status');
+                const textEl = document.getElementById('status-text');
+                statusEl.className = 'server-status offline';
+                textEl.innerHTML = '❌ Server Offline<br><small>Run: docker compose up -d app</small>';
+            }
+        }
+
+        // Check status immediately and then every 10 seconds
+        checkServerStatus();
+        setInterval(checkServerStatus, 10000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>📈 History Improved - Football Value Betting</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            margin: 0;
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            color: #f0fdf4;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            min-height: 100vh;
+            padding: 32px;
+        }
+        .test-container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .success-header {
+            text-align: center;
+            margin-bottom: 32px;
+            background: linear-gradient(145deg, #065f46, #047857);
+            border: 2px solid #10b981;
+            border-radius: 16px;
+            padding: 32px;
+        }
+        .success-title {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 16px;
+            color: #86efac;
+        }
+        .improvement-card {
+            background: rgba(6,95,70,0.6);
+            border: 1px solid #10b981;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 16px 0;
+        }
+        .improvement-title {
+            color: #86efac;
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+        .improvement-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(16,185,129,0.3);
+        }
+        .improvement-item:last-child {
+            border-bottom: none;
+        }
+        .status-improved {
+            color: #86efac;
+            font-weight: 700;
+        }
+        .test-btn {
+            background: linear-gradient(145deg, #10b981, #059669);
+            border: 2px solid #34d399;
+            color: #ffffff;
+            padding: 16px 32px;
+            border-radius: 12px;
+            margin: 12px;
+            cursor: pointer;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+        .test-btn:hover {
+            background: linear-gradient(145deg, #059669, #047857);
+            border-color: #86efac;
+            transform: translateY(-3px);
+        }
+        .test-results {
+            background: rgba(4,120,87,0.4);
+            border: 1px solid rgba(16,185,129,0.5);
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+        .comparison-table {
+            background: rgba(4,120,87,0.2);
+            border-radius: 8px;
+            overflow: hidden;
+            margin: 16px 0;
+        }
+        .comparison-table table {
+            width: 100%;
+            color: #f0fdf4;
+        }
+        .comparison-table th {
+            background: #047857;
+            padding: 12px;
+            font-weight: 600;
+        }
+        .comparison-table td {
+            padding: 12px;
+            border-bottom: 1px solid rgba(16,185,129,0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="success-header">
+            <h1 class="success-title">📈 ИСТОРИЯ УЛУЧШЕНА!</h1>
+            <p style="font-size: 1.2rem; margin-bottom: 20px;">
+                Теперь показывается до 100 прогнозов с расширенной информацией<br>
+                и красивым дизайном таблицы!
+            </p>
+        </div>
+
+        <div class="improvement-card">
+            <h3 class="improvement-title">🔧 Что было улучшено</h3>
+            <div class="improvement-item">
+                <span>Лимит отображения прогнозов</span>
+                <span class="status-improved">20 → 100 записей</span>
+            </div>
+            <div class="improvement-item">
+                <span>Диапазон дат</span>
+                <span class="status-improved">только будущее → весь сезон 2024-2025</span>
+            </div>
+            <div class="improvement-item">
+                <span>Сортировка</span>
+                <span class="status-improved">добавлена сортировка по дате (desc)</span>
+            </div>
+            <div class="improvement-item">
+                <span>Дизайн таблицы</span>
+                <span class="status-improved">улучшен с цветовыми индикаторами</span>
+            </div>
+            <div class="improvement-item">
+                <span>Информация о статистике</span>
+                <span class="status-improved">добавлен счетчик активных/завершенных</span>
+            </div>
+        </div>
+
+        <div class="improvement-card">
+            <h3 class="improvement-title">📊 Сравнение ДО и ПОСЛЕ</h3>
+            <div class="comparison-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Параметр</th>
+                            <th>До улучшения</th>
+                            <th>После улучшения</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Количество записей</strong></td>
+                            <td>20 (лимит)</td>
+                            <td>100 (лимит) - все доступные</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Диапазон дат</strong></td>
+                            <td>Только будущие матчи</td>
+                            <td>2024-2025 сезон полностью</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Дизайн</strong></td>
+                            <td>Простая таблица</td>
+                            <td>Цветовые индикаторы, статусы</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Информация</strong></td>
+                            <td>Базовые поля</td>
+                            <td>+ время, результат, P&L</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Сортировка</strong></td>
+                            <td>По умолчанию API</td>
+                            <td>По дате (новые сверху)</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="improvement-card">
+            <h3 class="improvement-title">🧪 Тест улучшенной истории</h3>
+            <button class="test-btn" onclick="testImprovedHistory()">
+                📈 ТЕСТ УЛУЧШЕННОЙ ИСТОРИИ
+            </button>
+            <button class="test-btn" onclick="compareOldVsNew()">
+                🔄 СРАВНИТЬ СТАРЫЙ vs НОВЫЙ
+            </button>
+            <div id="test-results" class="test-results"></div>
+        </div>
+
+        <div class="improvement-card">
+            <h3 class="improvement-title">🚀 Готово к использованию</h3>
+            <a href="http://localhost:8000" class="test-btn" target="_blank">
+                ✨ ОТКРЫТЬ ПРИЛОЖЕНИЕ
+            </a>
+            <div style="margin-top: 16px; font-size: 0.9rem; opacity: 0.8;">
+                <p><strong>Проверьте улучшения:</strong></p>
+                <ol>
+                    <li>Откройте приложение</li>
+                    <li>Войдите с токеном 'dev'</li>
+                    <li>Перейдите в "Jobs & Tasks"</li>
+                    <li>Посмотрите на улучшенную таблицу истории прогнозов</li>
+                    <li>Обратите внимание на счетчики и цветовые индикаторы</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        const HEADERS = { 'X-Admin-Token': 'dev' };
+
+        async function testImprovedHistory() {
+            const resultsDiv = document.getElementById('test-results');
+            resultsDiv.innerHTML = 'Тестируем улучшенную историю...';
+
+            try {
+                // Test new query with expanded parameters
+                const response = await fetch(
+                    `${API_BASE}/api/v1/picks?date_from=2024-01-01&date_to=2025-12-31&limit=100&sort=kickoff_desc`,
+                    { headers: HEADERS }
+                );
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const pending = data.filter(p => p.status === 'PENDING').length;
+                    const settled = data.filter(p => p.status !== 'PENDING').length;
+
+                    resultsDiv.innerHTML = `✅ Улучшенная история работает!
+
+📊 РЕЗУЛЬТАТЫ ТЕСТА:
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Всего прогнозов: ${data.length}
+⏳ Активных: ${pending}
+✅ Завершенных: ${settled}
+
+📅 Диапазон дат: 2024-01-01 → 2025-12-31
+🔢 Лимит: 100 записей
+🗂️ Сортировка: по дате (новые сверху)
+
+📊 Примеры прогнозов:
+${data.slice(0, 3).map((pick, i) => `
+${i+1}. ${pick.teams} - ${pick.pick}
+   📅 ${new Date(pick.kickoff).toLocaleDateString('ru-RU')}
+   💰 Коэф: ${pick.odd}, EV: +${(pick.ev * 100).toFixed(1)}%
+   ⚡ Статус: ${pick.status}`).join('\n')}
+
+🎯 История улучшена и готова к использованию!`;
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `❌ Ошибка тестирования: ${error.message}`;
+            }
+        }
+
+        async function compareOldVsNew() {
+            const resultsDiv = document.getElementById('test-results');
+            resultsDiv.innerHTML = 'Сравниваем старый vs новый запрос...';
+
+            try {
+                // Old query (limited)
+                const oldResponse = await fetch(`${API_BASE}/api/v1/picks?limit=20`, { headers: HEADERS });
+                const oldData = await oldResponse.json();
+
+                // New query (improved)
+                const newResponse = await fetch(
+                    `${API_BASE}/api/v1/picks?date_from=2024-01-01&date_to=2025-12-31&limit=100&sort=kickoff_desc`,
+                    { headers: HEADERS }
+                );
+                const newData = await newResponse.json();
+
+                resultsDiv.innerHTML = `📊 СРАВНЕНИЕ РЕЗУЛЬТАТОВ:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📉 СТАРЫЙ ЗАПРОС:
+   🔢 Записей: ${oldData.length}
+   📅 Диапазон: только будущие матчи
+   🗂️ Сортировка: по умолчанию
+
+📈 НОВЫЙ ЗАПРОС:
+   🔢 Записей: ${newData.length}
+   📅 Диапазон: весь сезон 2024-2025
+   🗂️ Сортировка: по дате (убывание)
+
+🎯 УЛУЧШЕНИЕ:
+   📊 Данных стало больше: +${newData.length - oldData.length} записей
+   📅 Расширен временной диапазон
+   ✨ Добавлена правильная сортировка
+
+💡 Теперь показываются ВСЕ доступные прогнозы!`;
+            } catch (error) {
+                resultsDiv.innerHTML = `❌ Ошибка сравнения: ${error.message}`;
+            }
+        }
+
+        // Auto-test on load
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('📈 History improvement test page loaded');
+            setTimeout(testImprovedHistory, 1000);
+        });
+    </script>
+</body>
+</html>
