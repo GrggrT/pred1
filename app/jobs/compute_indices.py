@@ -19,6 +19,8 @@ SHORT_WINDOW = 5
 LONG_WINDOW = 15
 VENUE_WINDOW = 5
 PREFETCH_LIMIT = 50
+XG_L5_WINDOW = 5
+XG_L10_WINDOW = 10
 
 
 @dataclass
@@ -152,6 +154,87 @@ def _before_cutoff(
     return out
 
 
+async def _prefetch_hist_xg(
+    session: AsyncSession,
+    team_ids: List[int],
+    cutoff_end: datetime,
+    limit: int = 15,
+) -> Dict[int, List[Tuple[datetime, Optional[Decimal]]]]:
+    """
+    Fetch historical xG from hist_fixtures for rolling xG calculation.
+    Falls back to current fixtures if hist_fixtures doesn't exist.
+    Returns {team_id: [(match_date, xg_value), ...]} ordered by date DESC.
+    """
+    if not team_ids:
+        return {}
+    try:
+        res = await session.execute(
+            text(
+                """
+                WITH team_xg AS (
+                  SELECT
+                    hf.match_date AS kickoff,
+                    hf.home_team_id AS team_id,
+                    COALESCE(hf.xg_home, hf.goals_home)::numeric AS xg_val
+                  FROM hist_fixtures hf
+                  WHERE hf.status = 'FT'
+                    AND hf.match_date < :cutoff_end
+                    AND hf.home_team_id IN (SELECT unnest(CAST(:team_ids AS integer[])))
+                    AND (hf.xg_home IS NOT NULL OR hf.goals_home IS NOT NULL)
+
+                  UNION ALL
+
+                  SELECT
+                    hf.match_date AS kickoff,
+                    hf.away_team_id AS team_id,
+                    COALESCE(hf.xg_away, hf.goals_away)::numeric AS xg_val
+                  FROM hist_fixtures hf
+                  WHERE hf.status = 'FT'
+                    AND hf.match_date < :cutoff_end
+                    AND hf.away_team_id IN (SELECT unnest(CAST(:team_ids AS integer[])))
+                    AND (hf.xg_away IS NOT NULL OR hf.goals_away IS NOT NULL)
+                ),
+                ranked AS (
+                  SELECT
+                    kickoff, team_id, xg_val,
+                    ROW_NUMBER() OVER (PARTITION BY team_id ORDER BY kickoff DESC) AS rn
+                  FROM team_xg
+                  WHERE xg_val IS NOT NULL
+                )
+                SELECT kickoff, team_id, xg_val
+                FROM ranked
+                WHERE rn <= :lim
+                ORDER BY team_id, kickoff DESC
+                """
+            ),
+            {"cutoff_end": cutoff_end, "team_ids": team_ids, "lim": limit},
+        )
+        out: Dict[int, List[Tuple[datetime, Optional[Decimal]]]] = {}
+        for r in res.fetchall():
+            out.setdefault(r.team_id, []).append((r.kickoff, q_money(r.xg_val) if r.xg_val is not None else None))
+        return out
+    except Exception:
+        # hist_fixtures table might not exist yet
+        return {}
+
+
+def _rolling_xg_mean(
+    history: List[Tuple[datetime, Optional[Decimal]]],
+    cutoff: datetime,
+    window: int,
+) -> Optional[Decimal]:
+    """Compute mean xG from the last `window` matches before cutoff."""
+    vals: List[Decimal] = []
+    for kickoff, xg_val in history:
+        if kickoff >= cutoff:
+            continue
+        if xg_val is not None:
+            vals.append(xg_val)
+        if len(vals) >= window:
+            break
+    return _average(vals) if vals else None
+
+
 async def _target_fixtures(session: AsyncSession) -> List:
     now_utc = utcnow()
     horizon = now_utc + (timedelta(days=1) if settings.backtest_mode else timedelta(days=7))
@@ -264,11 +347,14 @@ async def _upsert_indices(
               home_venue_for, home_venue_against,
               away_venue_for, away_venue_against,
               home_rest_hours, away_rest_hours,
+              home_xg_l5, home_xg_l10,
+              away_xg_l5, away_xg_l10,
               created_at
             )
             VALUES(
               :fid, :hff, :hfa, :aff, :afa, :hcf, :hca, :acf, :aca,
-              :hvf, :hva, :avf, :ava, :hrh, :arh, now()
+              :hvf, :hva, :avf, :ava, :hrh, :arh,
+              :hxg5, :hxg10, :axg5, :axg10, now()
             )
             ON CONFLICT (fixture_id) DO UPDATE SET
               home_form_for=:hff, home_form_against=:hfa,
@@ -278,6 +364,8 @@ async def _upsert_indices(
               home_venue_for=:hvf, home_venue_against=:hva,
               away_venue_for=:avf, away_venue_against=:ava,
               home_rest_hours=:hrh, away_rest_hours=:arh,
+              home_xg_l5=:hxg5, home_xg_l10=:hxg10,
+              away_xg_l5=:axg5, away_xg_l10=:axg10,
               created_at=now()
             """
         ),
@@ -296,6 +384,7 @@ async def run(session: AsyncSession):
     cutoff_end = max(r.kickoff for r in fixtures)
     team_ids = sorted({int(r.home_team_id) for r in fixtures} | {int(r.away_team_id) for r in fixtures})
     hist_all = await _prefetch_team_history(session, team_ids, cutoff_end, limit=PREFETCH_LIMIT)
+    hist_xg = await _prefetch_hist_xg(session, team_ids, cutoff_end, limit=XG_L10_WINDOW + 5)
     processed = 0
 
     for row in fixtures:
@@ -321,6 +410,14 @@ async def run(session: AsyncSession):
         league_home_avg, league_away_avg = await _league_baseline_cache(
             session, league_cache, row.league_id, row.season, row.kickoff
         )
+        # Rolling xG from hist_fixtures
+        home_hist_xg = hist_xg.get(int(row.home_team_id), [])
+        away_hist_xg = hist_xg.get(int(row.away_team_id), [])
+        home_xg_l5 = _rolling_xg_mean(home_hist_xg, row.kickoff, XG_L5_WINDOW)
+        home_xg_l10 = _rolling_xg_mean(home_hist_xg, row.kickoff, XG_L10_WINDOW)
+        away_xg_l5 = _rolling_xg_mean(away_hist_xg, row.kickoff, XG_L5_WINDOW)
+        away_xg_l10 = _rolling_xg_mean(away_hist_xg, row.kickoff, XG_L10_WINDOW)
+
         indices = {
             "hff": _with_fallback(home_form_for, league_home_avg),
             "hfa": _with_fallback(home_form_against, league_away_avg),
@@ -336,6 +433,10 @@ async def run(session: AsyncSession):
             "ava": _with_fallback(away_venue_against, league_home_avg),
             "hrh": home_rest_hours,
             "arh": away_rest_hours,
+            "hxg5": home_xg_l5,
+            "hxg10": home_xg_l10,
+            "axg5": away_xg_l5,
+            "axg10": away_xg_l10,
         }
 
         await _upsert_indices(session, row.id, indices)

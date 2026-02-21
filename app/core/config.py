@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     job_evaluate_results_cron: str = Field("0 * * * *", alias="JOB_EVALUATE_RESULTS_CRON")
     job_maintenance_cron: str = Field("30 3 * * *", alias="JOB_MAINTENANCE_CRON")
     job_quality_report_cron: str = Field("30 6,23 * * *", alias="JOB_QUALITY_REPORT_CRON")
+    job_fetch_historical_cron: str = Field("0 4 * * *", alias="JOB_FETCH_HISTORICAL_CRON")
     quality_report_cache_ttl_seconds: int = Field(default=12 * 3600, alias="QUALITY_REPORT_CACHE_TTL_SECONDS")
 
     fetch_rate_ms: int = Field(200, alias="FETCH_RATE_MS")
@@ -210,6 +211,46 @@ class Settings(BaseSettings):
 
     run_now_min_interval_seconds: int = Field(default=3, alias="RUN_NOW_MIN_INTERVAL_SECONDS")
     run_now_max_per_minute: int = Field(default=20, alias="RUN_NOW_MAX_PER_MINUTE")
+
+    # Per-league betting controls
+    # Comma-separated league IDs where 1X2 bets are allowed. Empty = all leagues.
+    league_1x2_enabled_raw: str = Field(default="", alias="LEAGUE_1X2_ENABLED")
+    # Per-league EV threshold overrides (format: "39:0.12,61:0.12")
+    league_ev_threshold_overrides_raw: str = Field(default="39:0.12,61:0.12", alias="LEAGUE_EV_THRESHOLD_OVERRIDES")
+    # Enable/disable TOTAL market bets globally
+    enable_total_bets: bool = Field(default=False, alias="ENABLE_TOTAL_BETS")
+    # EV threshold for TOTAL market (higher than 1X2 due to lower model edge)
+    value_threshold_total: Decimal = Field(Decimal("0.12"), alias="VALUE_THRESHOLD_TOTAL")
+
+    @property
+    def league_1x2_enabled(self) -> List[int]:
+        """List of league IDs where 1X2 bets are enabled. Empty list = all leagues allowed."""
+        raw = (self.league_1x2_enabled_raw or "").strip()
+        if not raw:
+            return []
+        return [int(x.strip()) for x in raw.split(",") if x.strip()]
+
+    @property
+    def league_ev_threshold_overrides(self) -> dict[int, Decimal]:
+        """Per-league EV threshold overrides. E.g. {39: 0.12, 61: 0.12}."""
+        overrides: dict[int, Decimal] = {}
+        raw = (self.league_ev_threshold_overrides_raw or "").strip()
+        if not raw:
+            return overrides
+        try:
+            for pair in raw.split(","):
+                if ":" not in pair:
+                    continue
+                lid_raw, val_raw = pair.split(":", 1)
+                lid = int(lid_raw.strip())
+                overrides[lid] = q_ev(Decimal(val_raw.strip()))
+        except Exception:
+            return {}
+        return overrides
+
+    @property
+    def value_threshold_total_dec(self) -> Decimal:
+        return q_ev(self.value_threshold_total)
 
     @property
     def hybrid_weights(self) -> dict:

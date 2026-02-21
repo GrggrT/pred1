@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.db import init_db
 from app.core.http import init_http_clients, close_http_clients
 from app.jobs import build_predictions, compute_indices, evaluate_results, sync_data, quality_report
-from app.jobs import maintenance
+from app.jobs import maintenance, fetch_historical_update
 from app.main import _run_job, _snapshot_autofill_tick, _validate_runtime_config
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,10 @@ async def _scheduled_maintenance():
 
 async def _scheduled_quality_report():
     await _run_job("quality_report", quality_report.run, triggered_by="scheduler")
+
+
+async def _scheduled_fetch_historical_update():
+    await _run_job("fetch_historical_update", fetch_historical_update.run, triggered_by="scheduler")
 
 
 async def main() -> None:
@@ -96,6 +100,16 @@ async def main() -> None:
         coalesce=True,
         misfire_grace_time=300,
     )
+
+    if settings.job_fetch_historical_cron:
+        scheduler.add_job(
+            _scheduled_fetch_historical_update,
+            CronTrigger.from_crontab(settings.job_fetch_historical_cron),
+            id="fetch_historical_update",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=600,
+        )
 
     if settings.snapshot_autofill_enabled:
         scheduler.add_job(

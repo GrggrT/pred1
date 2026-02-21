@@ -25,6 +25,61 @@ ELO_ADJ_MAX = D("1.25")
 ELO_ADJ_K = D("1600")
 LAMBDA_EPS = D("0.001")
 
+# Hardcoded value_threshold for 1X2 market (raised from 0.05 to 0.08 per CONTEXT.md)
+VALUE_THRESHOLD_1X2 = D("0.08")
+
+# Signal score threshold: below this → forced SKIP for 1X2
+SIGNAL_SCORE_SKIP_THRESHOLD = D("0.6")
+
+# Fallback logistic coefficients (original hardcoded values)
+LOGISTIC_FALLBACK_ELO_COEF = 0.002
+LOGISTIC_FALLBACK_XPTS_COEF = 0.05
+
+
+async def _load_model_params(session: AsyncSession, scope: str = "global", league_id: int | None = None) -> Dict[str, float]:
+    """Load trained model params from model_params table. Returns dict of param_name -> value."""
+    params: Dict[str, float] = {}
+    try:
+        if league_id is not None:
+            res = await session.execute(
+                text("SELECT param_name, param_value FROM model_params WHERE scope=:scope AND league_id=:lid"),
+                {"scope": scope, "lid": league_id},
+            )
+        else:
+            res = await session.execute(
+                text("SELECT param_name, param_value FROM model_params WHERE scope=:scope AND league_id IS NULL"),
+                {"scope": scope},
+            )
+        for r in res.fetchall():
+            params[r.param_name] = float(r.param_value)
+    except Exception:
+        pass
+    return params
+
+
+def _get_logistic_coefs(model_params: Dict[str, float]) -> tuple[float, float]:
+    """Extract elo_diff and xpts_diff coefficients from model_params with fallback."""
+    # The trained model stores per-class coefficients. For the simple logistic used in
+    # logistic_probs_from_features we need a single elo_coef and xpts_coef that capture
+    # home-vs-away difference. Use HOME_WIN class coefficients as the differential signal.
+    elo_coef = model_params.get(
+        "logistic_coef_home_win_elo_diff",
+        LOGISTIC_FALLBACK_ELO_COEF,
+    )
+    xpts_coef = model_params.get(
+        "logistic_coef_home_win_xpts_diff",
+        LOGISTIC_FALLBACK_XPTS_COEF,
+    )
+    return elo_coef, xpts_coef
+
+
+def _get_optimal_alpha(model_params: Dict[str, float]) -> Decimal | None:
+    """Get optimal power-scaling alpha from model_params, or None for default."""
+    val = model_params.get("optimal_alpha")
+    if val is not None:
+        return q_prob(D(val))
+    return None
+
 
 def _clamp_decimal(value: Decimal, lo: Decimal, hi: Decimal) -> Decimal:
     if value < lo:
@@ -353,8 +408,14 @@ def _elo_gap_score(elo_diff: Decimal) -> Decimal:
     return q_prob(score * D("0.3"))
 
 
-def logistic_probs_from_features(elo_diff: Decimal, xpts_diff: Decimal, p_draw: Decimal) -> Tuple[Decimal, Decimal, Decimal]:
-    z = 0.002 * float(elo_diff) + 0.05 * float(xpts_diff)
+def logistic_probs_from_features(
+    elo_diff: Decimal,
+    xpts_diff: Decimal,
+    p_draw: Decimal,
+    elo_coef: float = LOGISTIC_FALLBACK_ELO_COEF,
+    xpts_coef: float = LOGISTIC_FALLBACK_XPTS_COEF,
+) -> Tuple[Decimal, Decimal, Decimal]:
+    z = elo_coef * float(elo_diff) + xpts_coef * float(xpts_diff)
     p_home_win = 1 / (1 + math.exp(-z))
     p_draw_clamped = float(_clamp_decimal(D(p_draw), D("0.15"), D("0.35")))
     remaining = max(0.0, 1.0 - p_draw_clamped)
@@ -548,6 +609,28 @@ async def run(session: AsyncSession):
     elo_cutoff = utcnow() if settings.backtest_mode else None
     await apply_elo_from_fixtures(session, league_ids=settings.league_ids, cutoff=elo_cutoff)
 
+    # Load trained model params (with fallback to hardcoded defaults)
+    model_params = await _load_model_params(session, scope="global")
+    logistic_elo_coef, logistic_xpts_coef = _get_logistic_coefs(model_params)
+    trained_alpha = _get_optimal_alpha(model_params)
+    if model_params:
+        log.info("build_predictions loaded %d model_params (elo_coef=%.6f xpts_coef=%.6f alpha=%s)",
+                 len(model_params), logistic_elo_coef, logistic_xpts_coef,
+                 float(trained_alpha) if trained_alpha else "default")
+    else:
+        log.info("build_predictions no model_params found, using fallback coefficients")
+
+    # Log per-league controls
+    league_1x2_list = settings.league_1x2_enabled
+    league_ev_overrides = settings.league_ev_threshold_overrides
+    if league_1x2_list:
+        log.info("build_predictions 1X2 enabled for leagues: %s", league_1x2_list)
+    if league_ev_overrides:
+        log.info("build_predictions EV threshold overrides: %s", league_ev_overrides)
+    log.info("build_predictions TOTAL bets: %s (threshold=%.2f)",
+             "enabled" if settings.enable_total_bets else "DISABLED",
+             float(settings.value_threshold_total_dec))
+
     rows = await _target_rows(session)
     if not rows:
         log.info("build_predictions no fixtures")
@@ -695,7 +778,10 @@ async def run(session: AsyncSession):
         }
         probs_map["logistic"] = None
         if settings.use_logistic_probs or settings.use_hybrid_probs:
-            phl, pdl, pal = logistic_probs_from_features(elo_diff, xpts_diff, league_draw_freq)
+            phl, pdl, pal = logistic_probs_from_features(
+                elo_diff, xpts_diff, p_draw_dc,
+                elo_coef=logistic_elo_coef, xpts_coef=logistic_xpts_coef,
+            )
             probs_map["logistic"] = {"home": phl, "draw": pdl, "away": pal}
         if settings.use_hybrid_probs:
             weights = settings.hybrid_weights
@@ -724,7 +810,9 @@ async def run(session: AsyncSession):
         probs = {"HOME_WIN": p_home, "DRAW": p_draw, "AWAY_WIN": p_away}
 
         # League-specific probability calibration (power scaling) to improve logloss.
-        p_home, p_draw, p_away = _power_scale_1x2(p_home, p_draw, p_away, calib_alpha)
+        # Use trained alpha from model_params if available, otherwise fall back to league baseline.
+        effective_alpha = trained_alpha if trained_alpha is not None else calib_alpha
+        p_home, p_draw, p_away = _power_scale_1x2(p_home, p_draw, p_away, effective_alpha)
         probs = {"HOME_WIN": p_home, "DRAW": p_draw, "AWAY_WIN": p_away}
 
         odds_map = {
@@ -759,7 +847,7 @@ async def run(session: AsyncSession):
             "prob_source": prob_source,
             "league_draw_freq": float(league_draw_freq),
             "dc_rho": float(dc_rho),
-            "calib_alpha": float(calib_alpha),
+            "calib_alpha": float(effective_alpha),
             "standings_delta": float(standings_delta),
             "samples_score": float(samples_score),
             "volatility_score": float(volatility_score),
@@ -787,7 +875,10 @@ async def run(session: AsyncSession):
             goal_variance = q_xg(goal_variance * D("1.05"))
         feature_flags["goal_variance"] = float(goal_variance)
 
-        base_threshold = settings.value_threshold_dec
+        # Per-league EV threshold override (e.g. EPL=0.12, Ligue1=0.12)
+        league_override = settings.league_ev_threshold_overrides.get(int(row.league_id))
+        base_threshold = league_override if league_override is not None else VALUE_THRESHOLD_1X2
+
         if signal_score < D("0.5"):
             effective_threshold = q_ev(base_threshold + D("0.05"))
         elif signal_score > D("0.8"):
@@ -795,6 +886,10 @@ async def run(session: AsyncSession):
         else:
             effective_threshold = base_threshold
         feature_flags["effective_threshold"] = float(effective_threshold)
+
+        # Per-league 1X2 bet enablement check
+        league_1x2_list = settings.league_1x2_enabled
+        league_1x2_blocked = bool(league_1x2_list) and int(row.league_id) not in league_1x2_list
 
         info_extra = {
             "lam_home": float(lam_home),
@@ -865,6 +960,118 @@ async def run(session: AsyncSession):
             "effective_threshold": float(effective_threshold),
             "candidates": candidates[:3],
         }
+
+        # Forced SKIP for low signal_score (not enough data confidence)
+        if signal_score < SIGNAL_SCORE_SKIP_THRESHOLD and selection is not None:
+            decision_payload["action"] = "SKIP"
+            decision_payload["reason"] = "signal_score_below_threshold"
+            decision_payload["selection"] = selection
+            decision_payload["signal_score"] = float(signal_score)
+            await _upsert_decision(session, row.id, "1X2", decision_payload)
+            selection = "SKIP"
+            status = "VOID"
+            skips += 1
+            log.info(
+                "skip_low_signal fixture=%s signal=%.3f < %.3f",
+                row.id, float(signal_score), float(SIGNAL_SCORE_SKIP_THRESHOLD),
+            )
+
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO predictions(
+                      fixture_id, selection_code, confidence,
+                      initial_odd, value_index, status, profit, signal_score, feature_flags, created_at
+                    )
+                    VALUES(
+                      :fid, :sel, :conf,
+                      :odd, :val, :status, NULL, :signal, :flags, now()
+                    )
+                    ON CONFLICT (fixture_id) DO UPDATE SET
+                      selection_code=:sel,
+                      confidence=:conf,
+                      initial_odd=:odd,
+                      value_index=:val,
+                      status=:status,
+                      signal_score=:signal,
+                      feature_flags=:flags,
+                      created_at=now()
+                    """
+                ),
+                {
+                    "fid": row.id,
+                    "sel": "SKIP",
+                    "conf": None,
+                    "odd": None,
+                    "val": None,
+                    "status": "VOID",
+                    "signal": signal_score,
+                    "flags": json.dumps(feature_flags),
+                },
+            )
+            # Still process totals below
+            # Fall through to totals section
+            total_threshold = settings.value_threshold_total_dec
+            if settings.enable_total_bets and (row.over_2_5 is not None or row.under_2_5 is not None):
+                best_selection_t = None
+                best_ev_t = None
+                best_prob_t = None
+                best_odd_t = None
+
+                if row.over_2_5 is not None:
+                    odd_over = q_money(row.over_2_5)
+                    ev_over = q_ev(p_over_2_5 * odd_over - D(1))
+                    if ev_over > total_threshold and settings.min_odd_dec <= odd_over <= settings.max_odd_dec:
+                        best_selection_t = "OVER_2_5"
+                        best_ev_t = ev_over
+                        best_prob_t = p_over_2_5
+                        best_odd_t = odd_over
+                if row.under_2_5 is not None:
+                    odd_under = q_money(row.under_2_5)
+                    ev_under = q_ev(p_under_2_5 * odd_under - D(1))
+                    if ev_under > total_threshold and settings.min_odd_dec <= odd_under <= settings.max_odd_dec:
+                        if best_ev_t is None or ev_under > best_ev_t:
+                            best_selection_t = "UNDER_2_5"
+                            best_ev_t = ev_under
+                            best_prob_t = p_under_2_5
+                            best_odd_t = odd_under
+
+                if best_selection_t:
+                    total_bets += 1
+                    await _upsert_decision(session, row.id, "TOTAL", {
+                        "market": "TOTAL", "action": "BET", "reason": "ev_above_threshold",
+                        "selection": best_selection_t, "lam_total": float(lam_total),
+                        "prob": float(best_prob_t), "odd": float(best_odd_t), "ev": float(best_ev_t),
+                        "effective_threshold": float(total_threshold),
+                    })
+                    await session.execute(
+                        text("""
+                            INSERT INTO predictions_totals(fixture_id, market, selection, confidence, initial_odd, value_index, created_at)
+                            VALUES (:fid, 'TOTAL', :sel, :conf, :odd, :val, now())
+                            ON CONFLICT (fixture_id, market) DO UPDATE SET selection=:sel, confidence=:conf, initial_odd=:odd, value_index=:val, created_at=now()
+                        """),
+                        {"fid": row.id, "sel": best_selection_t, "conf": best_prob_t, "odd": best_odd_t, "val": best_ev_t},
+                    )
+                else:
+                    total_skips += 1
+                    await _upsert_decision(session, row.id, "TOTAL", {
+                        "market": "TOTAL", "action": "SKIP", "reason": "ev_below_threshold_or_out_of_range",
+                        "lam_total": float(lam_total), "effective_threshold": float(total_threshold),
+                    })
+            elif not settings.enable_total_bets:
+                total_skips += 1
+            continue
+
+        # Block 1X2 bets for leagues not in LEAGUE_1X2_ENABLED list
+        if league_1x2_blocked and selection is not None:
+            decision_payload["action"] = "SKIP"
+            decision_payload["reason"] = "league_1x2_disabled"
+            decision_payload["league_id"] = int(row.league_id)
+            await _upsert_decision(session, row.id, "1X2", decision_payload)
+            selection = "SKIP"
+            status = "VOID"
+            skips += 1
+            log.info("skip_league_disabled fixture=%s league=%s", row.id, row.league_id)
 
         chosen_sel = selection
         if chosen_sel is None:
@@ -1019,8 +1226,9 @@ async def run(session: AsyncSession):
             },
         )
 
-        # Totals market (Over/Under 2.5) if odds available
-        if row.over_2_5 is not None or row.under_2_5 is not None:
+        # Totals market (Over/Under 2.5) if odds available and enabled
+        total_threshold = settings.value_threshold_total_dec
+        if settings.enable_total_bets and (row.over_2_5 is not None or row.under_2_5 is not None):
             best_selection = None
             best_ev = None
             best_prob = None
@@ -1029,7 +1237,7 @@ async def run(session: AsyncSession):
             if row.over_2_5 is not None:
                 odd_over = q_money(row.over_2_5)
                 ev_over = q_ev(p_over_2_5 * odd_over - D(1))
-                if ev_over > settings.value_threshold_dec and settings.min_odd_dec <= odd_over <= settings.max_odd_dec:
+                if ev_over > total_threshold and settings.min_odd_dec <= odd_over <= settings.max_odd_dec:
                     best_selection = "OVER_2_5"
                     best_ev = ev_over
                     best_prob = p_over_2_5
@@ -1037,7 +1245,7 @@ async def run(session: AsyncSession):
             if row.under_2_5 is not None:
                 odd_under = q_money(row.under_2_5)
                 ev_under = q_ev(p_under_2_5 * odd_under - D(1))
-                if ev_under > settings.value_threshold_dec and settings.min_odd_dec <= odd_under <= settings.max_odd_dec:
+                if ev_under > total_threshold and settings.min_odd_dec <= odd_under <= settings.max_odd_dec:
                     if best_ev is None or ev_under > best_ev:
                         best_selection = "UNDER_2_5"
                         best_ev = ev_under
@@ -1058,7 +1266,7 @@ async def run(session: AsyncSession):
                         "prob": float(best_prob) if best_prob is not None else None,
                         "odd": float(best_odd) if best_odd is not None else None,
                         "ev": float(best_ev) if best_ev is not None else None,
-                        "effective_threshold": float(settings.value_threshold_dec),
+                        "effective_threshold": float(total_threshold),
                         "candidates": [
                             {
                                 "selection": "OVER_2_5",
@@ -1120,7 +1328,7 @@ async def run(session: AsyncSession):
                         "action": "SKIP",
                         "reason": "ev_below_threshold_or_out_of_range",
                         "lam_total": float(lam_total),
-                        "effective_threshold": float(settings.value_threshold_dec),
+                        "effective_threshold": float(total_threshold),
                         "candidates": [
                             {
                                 "selection": "OVER_2_5",
@@ -1138,6 +1346,8 @@ async def run(session: AsyncSession):
                     },
                 )
                 total_skips += 1
+        elif not settings.enable_total_bets:
+            total_skips += 1
 
     await session.commit()
     log.info(

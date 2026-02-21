@@ -262,9 +262,30 @@ async def _log_roi(session: AsyncSession):
         )
 
 
+async def _has_pending_totals(session: AsyncSession) -> bool:
+    """Quick existence check for pending totals without fetching full rows."""
+    try:
+        res = await session.execute(
+            text(
+                """
+                SELECT 1
+                FROM predictions_totals pt
+                JOIN fixtures f ON f.id=pt.fixture_id
+                WHERE COALESCE(pt.status, 'PENDING') = 'PENDING'
+                  AND f.status IN ('FT', 'AET', 'PEN')
+                LIMIT 1
+                """
+            ),
+            {},
+        )
+        return res.first() is not None
+    except Exception:
+        return False
+
+
 async def run(session: AsyncSession):
     rows = await _pending_predictions(session)
-    totals_rows = await _pending_totals(session)
+    has_totals = await _has_pending_totals(session)
     day_start, day_end_exclusive = _backtest_day_window()
     elo_cutoff = day_end_exclusive if settings.backtest_mode and day_end_exclusive else None
     if day_start and day_end_exclusive:
@@ -273,12 +294,7 @@ async def run(session: AsyncSession):
             for r in rows
             if getattr(r, "kickoff", None) and day_start <= ensure_aware_utc(r.kickoff) < day_end_exclusive
         ]
-        totals_rows = [
-            r
-            for r in totals_rows
-            if getattr(r, "kickoff", None) and day_start <= ensure_aware_utc(r.kickoff) < day_end_exclusive
-        ]
-    if not rows and not totals_rows:
+    if not rows and not has_totals:
         log.info("evaluate_results nothing to settle")
         voided_cancelled = await _void_cancelled_predictions(session, day_start=day_start, day_end=day_end_exclusive)
         voided_cancelled_totals = await _void_cancelled_totals(session, day_start=day_start, day_end=day_end_exclusive)
