@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
 import json
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -14,9 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.http import assets_client, request_with_retries
 from app.core.logger import get_logger
+from app.data.providers.api_football import get_fixture_by_id, get_standings
 from app.data.providers.deepl import translate_html
 from app.data.providers.telegram import send_message_parts, send_photo
-from app.services.text_image import render_headline_image
+try:
+    from app.services.html_image import render_headline_image_html
+except Exception:  # pragma: no cover - startup must survive optional renderer failures
+    render_headline_image_html = None
 from app.jobs import quality_report
 
 log = get_logger("services.publishing")
@@ -31,8 +38,14 @@ _SIGNAL_MED_PCT = 60.0
 _STAT_DIFF_MINOR = 0.25
 _STAT_DIFF_MAJOR = 0.45
 _LOGO_MAX_BYTES = 2 * 1024 * 1024
+_IMAGE_THEMES = {"pro", "viral"}
 
 _logo_cache: dict[str, bytes] = {}
+
+
+def _normalize_image_theme(value: str | None) -> str:
+    theme = (value or "").strip().lower()
+    return theme if theme in _IMAGE_THEMES else "pro"
 
 _LANG_MONTHS: dict[str, tuple[str, ...]] = {
     "ru": (
@@ -436,6 +449,15 @@ _LANG_TEXT: dict[str, dict[str, Any]] = {
         "selection_away_win": "Победа {team} (П2)",
         "selection_over": "Тотал Больше 2.5",
         "selection_under": "Тотал Меньше 2.5",
+        "selection_over_1_5": "Тотал Б 1.5",
+        "selection_under_1_5": "Тотал М 1.5",
+        "selection_over_3_5": "Тотал Б 3.5",
+        "selection_under_3_5": "Тотал М 3.5",
+        "selection_btts_yes": "Обе забьют — Да",
+        "selection_btts_no": "Обе забьют — Нет",
+        "selection_dc_1x": "Двойной шанс 1X",
+        "selection_dc_x2": "Двойной шанс X2",
+        "selection_dc_12": "Двойной шанс 12",
     },
     "en": {
         "hot_prediction": "🔥 HOT PREDICTION 🔥",
@@ -723,6 +745,15 @@ _LANG_TEXT: dict[str, dict[str, Any]] = {
         "selection_away_win": "Win {team} (2)",
         "selection_over": "Total Over 2.5",
         "selection_under": "Total Under 2.5",
+        "selection_over_1_5": "Total Over 1.5",
+        "selection_under_1_5": "Total Under 1.5",
+        "selection_over_3_5": "Total Over 3.5",
+        "selection_under_3_5": "Total Under 3.5",
+        "selection_btts_yes": "BTTS — Yes",
+        "selection_btts_no": "BTTS — No",
+        "selection_dc_1x": "Double Chance 1X",
+        "selection_dc_x2": "Double Chance X2",
+        "selection_dc_12": "Double Chance 12",
     },
     "uk": {
         "hot_prediction": "🔥 ГАРЯЧИЙ ПРОГНОЗ 🔥",
@@ -1010,6 +1041,15 @@ _LANG_TEXT: dict[str, dict[str, Any]] = {
         "selection_away_win": "Перемога {team} (П2)",
         "selection_over": "Тотал Більше 2.5",
         "selection_under": "Тотал Менше 2.5",
+        "selection_over_1_5": "Тотал Б 1.5",
+        "selection_under_1_5": "Тотал М 1.5",
+        "selection_over_3_5": "Тотал Б 3.5",
+        "selection_under_3_5": "Тотал М 3.5",
+        "selection_btts_yes": "Обидві заб'ють — Так",
+        "selection_btts_no": "Обидві заб'ють — Ні",
+        "selection_dc_1x": "Подвійний шанс 1X",
+        "selection_dc_x2": "Подвійний шанс X2",
+        "selection_dc_12": "Подвійний шанс 12",
     },
     "fr": {
         "hot_prediction": "🔥 PRONOSTIC CHAUD 🔥",
@@ -1302,6 +1342,15 @@ _LANG_TEXT: dict[str, dict[str, Any]] = {
         "selection_away_win": "Victoire {team} (2)",
         "selection_over": "Total Plus de 2.5",
         "selection_under": "Total Moins de 2.5",
+        "selection_over_1_5": "Total Plus de 1.5",
+        "selection_under_1_5": "Total Moins de 1.5",
+        "selection_over_3_5": "Total Plus de 3.5",
+        "selection_under_3_5": "Total Moins de 3.5",
+        "selection_btts_yes": "Les deux marquent — Oui",
+        "selection_btts_no": "Les deux marquent — Non",
+        "selection_dc_1x": "Double chance 1X",
+        "selection_dc_x2": "Double chance X2",
+        "selection_dc_12": "Double chance 12",
     },
     "de": {
         "hot_prediction": "🔥 HEISSER TIPP 🔥",
@@ -1579,6 +1628,15 @@ _LANG_TEXT: dict[str, dict[str, Any]] = {
         "selection_away_win": "Sieg {team} (2)",
         "selection_over": "Gesamt Über 2.5",
         "selection_under": "Gesamt Unter 2.5",
+        "selection_over_1_5": "Gesamt Über 1.5",
+        "selection_under_1_5": "Gesamt Unter 1.5",
+        "selection_over_3_5": "Gesamt Über 3.5",
+        "selection_under_3_5": "Gesamt Unter 3.5",
+        "selection_btts_yes": "Beide treffen — Ja",
+        "selection_btts_no": "Beide treffen — Nein",
+        "selection_dc_1x": "Doppelte Chance 1X",
+        "selection_dc_x2": "Doppelte Chance X2",
+        "selection_dc_12": "Doppelte Chance 12",
     },
     "pl": {
         "hot_prediction": "🔥 GORĄCY TYP 🔥",
@@ -1846,6 +1904,15 @@ _LANG_TEXT: dict[str, dict[str, Any]] = {
         "selection_away_win": "Wygrana {team} (2)",
         "selection_over": "Total Powyżej 2.5",
         "selection_under": "Total Poniżej 2.5",
+        "selection_over_1_5": "Total Powyżej 1.5",
+        "selection_under_1_5": "Total Poniżej 1.5",
+        "selection_over_3_5": "Total Powyżej 3.5",
+        "selection_under_3_5": "Total Poniżej 3.5",
+        "selection_btts_yes": "Obie strzelą — Tak",
+        "selection_btts_no": "Obie strzelą — Nie",
+        "selection_dc_1x": "Podwójna szansa 1X",
+        "selection_dc_x2": "Podwójna szansa X2",
+        "selection_dc_12": "Podwójna szansa 12",
     },
     "pt": {
         "hot_prediction": "🔥 PALPITE QUENTE 🔥",
@@ -2113,6 +2180,15 @@ _LANG_TEXT: dict[str, dict[str, Any]] = {
         "selection_away_win": "Vitória {team} (2)",
         "selection_over": "Total Acima de 2.5",
         "selection_under": "Total Abaixo de 2.5",
+        "selection_over_1_5": "Total Acima de 1.5",
+        "selection_under_1_5": "Total Abaixo de 1.5",
+        "selection_over_3_5": "Total Acima de 3.5",
+        "selection_under_3_5": "Total Abaixo de 3.5",
+        "selection_btts_yes": "Ambas marcam — Sim",
+        "selection_btts_no": "Ambas marcam — Não",
+        "selection_dc_1x": "Dupla hipótese 1X",
+        "selection_dc_x2": "Dupla hipótese X2",
+        "selection_dc_12": "Dupla hipótese 12",
     },
     "es": {
         "hot_prediction": "🔥 PRONÓSTICO CALIENTE 🔥",
@@ -2395,6 +2471,15 @@ _LANG_TEXT: dict[str, dict[str, Any]] = {
         "selection_away_win": "Victoria {team} (2)",
         "selection_over": "Total Más de 2.5",
         "selection_under": "Total Menos de 2.5",
+        "selection_over_1_5": "Total Más de 1.5",
+        "selection_under_1_5": "Total Menos de 1.5",
+        "selection_over_3_5": "Total Más de 3.5",
+        "selection_under_3_5": "Total Menos de 3.5",
+        "selection_btts_yes": "Ambos marcan — Sí",
+        "selection_btts_no": "Ambos marcan — No",
+        "selection_dc_1x": "Doble oportunidad 1X",
+        "selection_dc_x2": "Doble oportunidad X2",
+        "selection_dc_12": "Doble oportunidad 12",
     },
 }
 
@@ -2409,6 +2494,24 @@ class MarketPreview:
     experimental: bool
     quality_level: int
     reasons: list[str]
+
+
+@dataclass
+class ImageVisualContext:
+    league_country: str | None = None
+    league_round: str | None = None
+    venue_name: str | None = None
+    venue_city: str | None = None
+    home_rank: int | None = None
+    away_rank: int | None = None
+    home_points: int | None = None
+    away_points: int | None = None
+    home_played: int | None = None
+    away_played: int | None = None
+    home_goal_diff: int | None = None
+    away_goal_diff: int | None = None
+    home_form: str | None = None
+    away_form: str | None = None
 
 
 def _escape_html(value: str) -> str:
@@ -2522,6 +2625,141 @@ async def _fetch_logo_bytes(url: str | None) -> bytes | None:
         return None
 
 
+def _to_int_or_none(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _payload_dict(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _extract_1x2_chances(payload: Any) -> tuple[float | None, float | None, float | None]:
+    data = _payload_dict(payload)
+    if not data:
+        return None, None, None
+    candidates = data.get("candidates")
+    if not isinstance(candidates, list):
+        return None, None, None
+
+    probs: dict[str, float] = {}
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        selection = str(item.get("selection") or "").strip().upper()
+        if selection not in {"HOME_WIN", "DRAW", "AWAY_WIN"}:
+            continue
+        try:
+            value = float(item.get("prob"))
+        except Exception:
+            continue
+        if value < 0:
+            continue
+        probs[selection] = value
+
+    return probs.get("HOME_WIN"), probs.get("DRAW"), probs.get("AWAY_WIN")
+
+
+def _extract_standing_row(payload: dict, team_id: int) -> dict | None:
+    response = payload.get("response") or []
+    if not isinstance(response, list):
+        return None
+    for item in response:
+        league = (item or {}).get("league") if isinstance(item, dict) else None
+        standings = (league or {}).get("standings") if isinstance(league, dict) else None
+        if not isinstance(standings, list):
+            continue
+        for group in standings:
+            if not isinstance(group, list):
+                continue
+            for row in group:
+                if not isinstance(row, dict):
+                    continue
+                team = row.get("team") or {}
+                if _to_int_or_none(team.get("id")) == int(team_id):
+                    return row
+    return None
+
+
+async def _fetch_image_visual_context(session: AsyncSession, fixture: Any) -> ImageVisualContext:
+    ctx = ImageVisualContext()
+
+    fixture_id = _to_int_or_none(getattr(fixture, "id", None))
+    league_id = _to_int_or_none(getattr(fixture, "league_id", None))
+    season = _to_int_or_none(getattr(fixture, "season", None)) or _to_int_or_none(getattr(settings, "season", None))
+    home_team_id = _to_int_or_none(getattr(fixture, "home_team_id", None))
+    away_team_id = _to_int_or_none(getattr(fixture, "away_team_id", None))
+
+    if fixture_id:
+        try:
+            fixture_payload = await get_fixture_by_id(
+                session,
+                int(fixture_id),
+                metric_league_id=int(league_id) if league_id is not None else None,
+            )
+            response = fixture_payload.get("response") or []
+            item = response[0] if isinstance(response, list) and response else {}
+            fx = (item or {}).get("fixture") if isinstance(item, dict) else None
+            lg = (item or {}).get("league") if isinstance(item, dict) else None
+            venue = (fx or {}).get("venue") if isinstance(fx, dict) else None
+
+            if isinstance(lg, dict):
+                ctx.league_country = _clean_text(lg.get("country"))
+                ctx.league_round = _clean_text(lg.get("round"))
+            if isinstance(venue, dict):
+                ctx.venue_name = _clean_text(venue.get("name"))
+                ctx.venue_city = _clean_text(venue.get("city"))
+        except Exception:
+            log.exception("image_visual_fixture_context_failed fixture=%s", fixture_id)
+
+    if league_id and season and home_team_id and away_team_id:
+        try:
+            standings_payload = await get_standings(session, int(league_id), int(season))
+            home_row = _extract_standing_row(standings_payload, int(home_team_id))
+            away_row = _extract_standing_row(standings_payload, int(away_team_id))
+
+            if isinstance(home_row, dict):
+                all_stats = home_row.get("all") or {}
+                ctx.home_rank = _to_int_or_none(home_row.get("rank"))
+                ctx.home_points = _to_int_or_none(home_row.get("points"))
+                ctx.home_goal_diff = _to_int_or_none(home_row.get("goalsDiff"))
+                ctx.home_form = _clean_text(home_row.get("form"))
+                if isinstance(all_stats, dict):
+                    ctx.home_played = _to_int_or_none(all_stats.get("played"))
+
+            if isinstance(away_row, dict):
+                all_stats = away_row.get("all") or {}
+                ctx.away_rank = _to_int_or_none(away_row.get("rank"))
+                ctx.away_points = _to_int_or_none(away_row.get("points"))
+                ctx.away_goal_diff = _to_int_or_none(away_row.get("goalsDiff"))
+                ctx.away_form = _clean_text(away_row.get("form"))
+                if isinstance(all_stats, dict):
+                    ctx.away_played = _to_int_or_none(all_stats.get("played"))
+        except Exception:
+            log.exception("image_visual_standings_context_failed fixture=%s league=%s", fixture_id, league_id)
+
+    return ctx
+
+
 def _translate_reason(reason: str, lang: str | None) -> str:
     pack = _lang_pack(lang)
     raw = (reason or "").strip()
@@ -2580,6 +2818,13 @@ def _fmt_percent100(value: Any, digits: int = 1) -> str:
         return "—"
 
 
+def _plain_indicator_text(value: str | None) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"^[^\wА-Яа-я0-9]+", "", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
+
+
 def _split_message(text: str, max_len: int = 3900) -> list[str]:
     if len(text) <= max_len:
         return [text]
@@ -2622,14 +2867,28 @@ def _split_message(text: str, max_len: int = 3900) -> list[str]:
     return [p for p in parts if p]
 
 
+_SELECTION_LABEL_MAP = {
+    "OVER_2_5": "selection_over",
+    "UNDER_2_5": "selection_under",
+    "OVER_1_5": "selection_over_1_5",
+    "UNDER_1_5": "selection_under_1_5",
+    "OVER_3_5": "selection_over_3_5",
+    "UNDER_3_5": "selection_under_3_5",
+    "BTTS_YES": "selection_btts_yes",
+    "BTTS_NO": "selection_btts_no",
+    "DC_1X": "selection_dc_1x",
+    "DC_X2": "selection_dc_x2",
+    "DC_12": "selection_dc_12",
+}
+
+
 def _selection_label(selection: str, market: str, lang: str | None) -> str:
     pack = _lang_pack(lang)
     if market == "1X2":
         return {"HOME_WIN": "1", "DRAW": "X", "AWAY_WIN": "2"}.get(selection, selection)
-    if selection == "OVER_2_5":
-        return pack["selection_over"]
-    if selection == "UNDER_2_5":
-        return pack["selection_under"]
+    pack_key = _SELECTION_LABEL_MAP.get(selection)
+    if pack_key and pack_key in pack:
+        return pack[pack_key]
     return selection
 
 
@@ -2661,11 +2920,9 @@ def _selection_phrase(selection: str, market: str, home: str, away: str, lang: s
             return pack["selection_draw"]
         if selection == "AWAY_WIN":
             return pack["selection_away_win"].format(team=away)
-    if market == "TOTAL":
-        if selection == "OVER_2_5":
-            return pack["selection_over"]
-        if selection == "UNDER_2_5":
-            return pack["selection_under"]
+    pack_key = _SELECTION_LABEL_MAP.get(selection)
+    if pack_key and pack_key in pack:
+        return pack[pack_key]
     return selection
 
 
@@ -2966,8 +3223,12 @@ async def _fetch_fixture_data(session: AsyncSession, fixture_id: int) -> dict:
                 """
                 SELECT
                   f.id,
+                  f.league_id,
+                  f.season,
                   f.kickoff,
                   f.status,
+                  f.home_team_id,
+                  f.away_team_id,
                   l.name AS league_name,
                   l.logo_url AS league_logo_url,
                   th.name AS home_name,
@@ -3033,11 +3294,27 @@ async def _fetch_fixture_data(session: AsyncSession, fixture_id: int) -> dict:
         )
     ).first()
 
+    decision_1x2_row = (
+        await session.execute(
+            text(
+                """
+                SELECT payload
+                FROM prediction_decisions
+                WHERE fixture_id=:fid AND market='1X2'
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """
+            ),
+            {"fid": fixture_id},
+        )
+    ).first()
+
     return {
         "fixture": fixture_row,
         "pred_1x2": pred_row,
         "pred_total": totals_row,
         "indices": indices_row,
+        "decision_1x2": getattr(decision_1x2_row, "payload", None) if decision_1x2_row else None,
     }
 
 
@@ -3292,6 +3569,312 @@ async def build_preview(session: AsyncSession, fixture_id: int) -> dict:
     return preview
 
 
+def _preview_language(lang: str | None) -> str:
+    key = (lang or "").strip().lower()
+    if key in _LANG_TEXT:
+        return key
+    channels = settings.telegram_channels
+    if "ru" in channels:
+        return "ru"
+    if channels:
+        for item in channels.keys():
+            if item in _LANG_TEXT:
+                return item
+    return "ru"
+
+
+async def build_post_preview(
+    session: AsyncSession,
+    fixture_id: int,
+    *,
+    image_theme: str | None = None,
+    lang: str | None = None,
+) -> dict:
+    preview, data = await _build_preview_internal(session, fixture_id)
+    image_theme_norm = _normalize_image_theme(image_theme)
+    mode = preview.get("mode") or "manual"
+    lang_key = _preview_language(lang)
+
+    fixture = data["fixture"]
+    indices = data["indices"]
+    home_win_prob, draw_prob, away_win_prob = _extract_1x2_chances(data.get("decision_1x2"))
+    pred_by_market = {"1X2": data.get("pred_1x2"), "TOTAL": data.get("pred_total")}
+
+    home_logo_bytes: bytes | None = None
+    away_logo_bytes: bytes | None = None
+    league_logo_bytes: bytes | None = None
+    image_visual_context = ImageVisualContext()
+    if settings.publish_headline_image:
+        home_logo_bytes = await _fetch_logo_bytes(getattr(fixture, "home_logo_url", None))
+        away_logo_bytes = await _fetch_logo_bytes(getattr(fixture, "away_logo_url", None))
+        league_logo_bytes = await _fetch_logo_bytes(getattr(fixture, "league_logo_url", None))
+        image_visual_context = await _fetch_image_visual_context(session, fixture)
+
+    posts: list[dict[str, Any]] = []
+    for market in preview.get("markets", []):
+        market_name = str(market.get("market") or "").strip() or "UNKNOWN"
+        headline_raw_preview = str(market.get("headline_raw") or "").strip()
+        analysis_raw_preview = str(market.get("analysis_raw") or "").strip()
+        quality_level = int(market.get("quality_level") or 0)
+        experimental = bool(market.get("experimental"))
+        reasons = list(market.get("reasons") or [])
+
+        if not headline_raw_preview or not analysis_raw_preview:
+            posts.append(
+                {
+                    "market": market_name,
+                    "lang": lang_key,
+                    "status": "unavailable",
+                    "reason": "no_data",
+                    "publish_allowed": False,
+                    "experimental": experimental,
+                    "quality_level": quality_level,
+                    "reasons": reasons,
+                    "headline": "",
+                    "analysis": "",
+                    "headline_parts": [],
+                    "analysis_parts": [],
+                    "uses_image": False,
+                    "image_data_url": None,
+                    "image_fallback_reason": None,
+                    "render_time_ms": None,
+                    "messages": [],
+                }
+            )
+            continue
+
+        pred = pred_by_market.get(market_name)
+        if not pred:
+            posts.append(
+                {
+                    "market": market_name,
+                    "lang": lang_key,
+                    "status": "unavailable",
+                    "reason": "no_pred",
+                    "publish_allowed": False,
+                    "experimental": experimental,
+                    "quality_level": quality_level,
+                    "reasons": reasons,
+                    "headline": "",
+                    "analysis": "",
+                    "headline_parts": [],
+                    "analysis_parts": [],
+                    "uses_image": False,
+                    "image_data_url": None,
+                    "image_fallback_reason": None,
+                    "render_time_ms": None,
+                    "messages": [],
+                }
+            )
+            continue
+
+        odd = getattr(pred, "initial_odd", None)
+        prob = getattr(pred, "confidence", None)
+        signal = getattr(pred, "signal_score", None)
+        implied_prob = _calc_implied_prob(odd)
+        model_edge = (float(prob) - implied_prob) if prob is not None and implied_prob is not None else None
+        ev = _calc_ev(prob, odd)
+        tier = _prediction_tier(ev, signal, experimental)
+
+        local_lang = lang_key if lang_key in _LANG_TEXT else "ru"
+        pack = _lang_pack(local_lang)
+        bet_label = _bet_label(pack, tier)
+        indicator_title = _plain_indicator_text(
+            _variant_text(
+                pack,
+                "value_variants",
+                pack.get("value_indicators", "VALUE INDICATORS"),
+                f"{fixture_id}:{market_name}:{local_lang}:signal_title",
+            )
+        ) or "VALUE INDICATORS"
+        bookmakers_label = _plain_indicator_text(pack.get("bookmakers_give", "Bookmakers give")) or "Bookmakers give"
+        model_label = _plain_indicator_text(pack.get("our_model", "Our model")) or "Our model"
+        edge_suffix = _plain_indicator_text(pack.get("edge_short", "edge")) or "edge"
+        indicator_line_1 = f"{bookmakers_label}: {_fmt_percent(implied_prob, 1)}"
+        indicator_line_2 = f"{model_label}: {_fmt_percent(prob, 1)}"
+        if model_edge is not None:
+            indicator_line_2 = f"{indicator_line_2} ({model_edge * 100:+.1f}% {edge_suffix})"
+        indicator_line_3 = None
+
+        use_deepl = bool(
+            settings.publish_deepl_fallback
+            and settings.deepl_api_key
+            and lang_key not in _LANG_TEXT
+            and lang_key != "ru"
+        )
+        headline_raw, analysis_raw = _build_market_text(
+            fixture,
+            pred,
+            indices,
+            market_name,
+            experimental,
+            reasons,
+            local_lang,
+        )
+        protected: list[str] = []
+        if use_deepl:
+            protected = _extract_protected_values(f"{headline_raw}\n{analysis_raw}")
+            headline_payload = _prepare_translation_html(headline_raw)
+            analysis_payload = _prepare_translation_html(analysis_raw)
+            headline_raw = await translate_html(session, headline_payload, lang_key)
+            analysis_raw = await translate_html(session, analysis_payload, lang_key)
+            headline_raw = _restore_translated_html(headline_raw)
+            analysis_raw = _restore_translated_html(analysis_raw)
+
+        headline = _strip_protect_tags(headline_raw)
+        analysis = _strip_protect_tags(analysis_raw)
+        if use_deepl:
+            headline = _normalize_translated_text(headline, protected)
+            analysis = _normalize_translated_text(analysis, protected)
+
+        headline_parts = _split_message(headline)
+        analysis_parts = _split_message(analysis)
+        uses_image = False
+        image_data_url: str | None = None
+        image_fallback_reason: str | None = None
+        render_time_ms: int | None = None
+
+        if settings.publish_headline_image:
+            image_text = _strip_image_probability_line(headline)
+            common_image_kwargs = {
+                "home_logo": home_logo_bytes,
+                "away_logo": away_logo_bytes,
+                "league_logo": league_logo_bytes,
+                "league_label": str(getattr(fixture, "league_name", "") or ""),
+                "market_label": (
+                    "1X2" if market_name == "1X2" else "TOTAL" if market_name == "TOTAL" else market_name
+                ),
+                "bet_label": bet_label,
+            }
+            html_image_kwargs = {
+                **common_image_kwargs,
+                "style_variant": image_theme_norm,
+                "league_country": image_visual_context.league_country,
+                "league_round": image_visual_context.league_round,
+                "venue_name": image_visual_context.venue_name,
+                "venue_city": image_visual_context.venue_city,
+                "home_rank": image_visual_context.home_rank,
+                "away_rank": image_visual_context.away_rank,
+                "home_points": image_visual_context.home_points,
+                "away_points": image_visual_context.away_points,
+                "home_played": image_visual_context.home_played,
+                "away_played": image_visual_context.away_played,
+                "home_goal_diff": image_visual_context.home_goal_diff,
+                "away_goal_diff": image_visual_context.away_goal_diff,
+                "home_form": image_visual_context.home_form,
+                "away_form": image_visual_context.away_form,
+                "home_win_prob": home_win_prob,
+                "draw_prob": draw_prob,
+                "away_win_prob": away_win_prob,
+                "signal_title": indicator_title,
+                "signal_line_1": indicator_line_1,
+                "signal_line_2": indicator_line_2,
+                "signal_line_3": indicator_line_3,
+            }
+            if render_headline_image_html is not None:
+                render_started = time.perf_counter()
+                try:
+                    image_bytes = await asyncio.to_thread(
+                        render_headline_image_html,
+                        image_text,
+                        **html_image_kwargs,
+                    )
+                    render_time_ms = int((time.perf_counter() - render_started) * 1000)
+                    encoded = base64.b64encode(image_bytes).decode("ascii")
+                    image_data_url = f"data:image/png;base64,{encoded}"
+                    uses_image = True
+                except Exception:
+                    render_time_ms = int((time.perf_counter() - render_started) * 1000)
+                    image_fallback_reason = "html_render_failed"
+                    log.exception(
+                        "post_preview_html_render_failed fixture=%s market=%s lang=%s",
+                        fixture_id,
+                        market_name,
+                        lang_key,
+                    )
+            else:
+                image_fallback_reason = "html_renderer_unavailable"
+
+        messages: list[dict[str, Any]] = []
+        order = 1
+        if uses_image:
+            messages.append(
+                {
+                    "order": order,
+                    "type": "image",
+                    "section": "headline",
+                    "text": None,
+                }
+            )
+            order += 1
+            for part in analysis_parts:
+                messages.append(
+                    {
+                        "order": order,
+                        "type": "text",
+                        "section": "analysis",
+                        "text": part,
+                    }
+                )
+                order += 1
+        else:
+            for part in headline_parts:
+                messages.append(
+                    {
+                        "order": order,
+                        "type": "text",
+                        "section": "headline",
+                        "text": part,
+                    }
+                )
+                order += 1
+            for part in analysis_parts:
+                messages.append(
+                    {
+                        "order": order,
+                        "type": "text",
+                        "section": "analysis",
+                        "text": part,
+                    }
+                )
+                order += 1
+
+        publish_allowed = not (mode == "auto" and quality_level >= 2)
+        status = "ready" if publish_allowed else "blocked"
+        reason = None if publish_allowed else "quality_risk"
+        posts.append(
+            {
+                "market": market_name,
+                "lang": lang_key,
+                "status": status,
+                "reason": reason,
+                "publish_allowed": publish_allowed,
+                "experimental": experimental,
+                "quality_level": quality_level,
+                "reasons": reasons,
+                "headline": headline,
+                "analysis": analysis,
+                "headline_parts": headline_parts,
+                "analysis_parts": analysis_parts,
+                "uses_image": uses_image,
+                "image_data_url": image_data_url,
+                "image_fallback_reason": image_fallback_reason,
+                "render_time_ms": render_time_ms,
+                "messages": messages,
+            }
+        )
+
+    return {
+        "fixture_id": int(fixture_id),
+        "mode": mode,
+        "lang": lang_key,
+        "image_theme": image_theme_norm,
+        "image_enabled": bool(settings.publish_headline_image),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "posts": posts,
+    }
+
+
 async def _record_publication(
     session: AsyncSession,
     fixture_id: int,
@@ -3304,10 +3887,11 @@ async def _record_publication(
     headline_message_id: int | None = None,
     analysis_message_id: int | None = None,
     content_hash: str | None = None,
+    idempotency_key: str | None = None,
     payload: dict | None = None,
     error: str | None = None,
 ) -> None:
-    published_at = datetime.now(timezone.utc) if status == "ok" else None
+    published_at = datetime.now(timezone.utc) if status in {"ok", "published"} else None
     payload_json = None
     if payload is not None:
         if isinstance(payload, str):
@@ -3320,12 +3904,12 @@ async def _record_publication(
             INSERT INTO prediction_publications(
               fixture_id, market, language, channel_id, status,
               experimental, headline_message_id, analysis_message_id,
-              content_hash, payload, error, published_at
+              content_hash, idempotency_key, payload, error, published_at
             )
             VALUES(
               :fid, :market, :lang, :cid, :status,
               :exp, :mid_head, :mid_analysis,
-              :hash, CAST(:payload AS jsonb), :error,
+              :hash, :idempotency_key, CAST(:payload AS jsonb), :error,
               :published_at
             )
             """
@@ -3340,6 +3924,7 @@ async def _record_publication(
             "mid_head": headline_message_id,
             "mid_analysis": analysis_message_id,
             "hash": content_hash,
+            "idempotency_key": idempotency_key,
             "payload": payload_json,
             "error": error,
             "published_at": published_at,
@@ -3354,12 +3939,50 @@ def _hash_content(headline: str, analysis: str) -> str:
     return h.hexdigest()
 
 
+def _build_idempotency_key(
+    fixture_id: int,
+    market: str,
+    language: str,
+    channel_id: int,
+    content_hash: str,
+) -> str:
+    payload = f"{fixture_id}:{market}:{language}:{channel_id}:{content_hash}"
+    return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _publish_reservation_key(fixture_id: int) -> int:
+    digest = hashlib.blake2b(f"pred1:publish:{int(fixture_id)}".encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") & 0x7FFF_FFFF_FFFF_FFFF
+
+
+async def _try_publish_reservation(session: AsyncSession, fixture_id: int) -> bool:
+    try:
+        row = (
+            await session.execute(
+                text("SELECT pg_try_advisory_xact_lock(:k) AS ok"),
+                {"k": _publish_reservation_key(int(fixture_id))},
+            )
+        ).first()
+        if row is None:
+            return False
+        if hasattr(row, "ok"):
+            return bool(row.ok)
+        try:
+            return bool(row[0])
+        except Exception:
+            return False
+    except Exception:
+        log.exception("publish_reservation_lock_failed fixture=%s", fixture_id)
+        return False
+
+
 async def publish_fixture(
     session: AsyncSession,
     fixture_id: int,
     *,
     force: bool = False,
     dry_run: bool = False,
+    image_theme: str | None = None,
 ) -> dict:
     if not settings.telegram_bot_token and not dry_run:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
@@ -3367,19 +3990,40 @@ async def publish_fixture(
     if not channels:
         raise RuntimeError("No TELEGRAM_CHANNEL_* configured")
 
+    if not await _try_publish_reservation(session, int(fixture_id)):
+        return {
+            "fixture_id": fixture_id,
+            "mode": (settings.publish_mode or "manual").strip().lower(),
+            "dry_run": dry_run,
+            "image_theme": _normalize_image_theme(image_theme),
+            "reservation_locked": True,
+            "results": [
+                {
+                    "market": "*",
+                    "lang": "*",
+                    "status": "skipped",
+                    "reason": "publish_locked",
+                }
+            ],
+        }
+
     preview, data = await _build_preview_internal(session, fixture_id)
     mode = preview.get("mode") or "manual"
+    image_theme_norm = _normalize_image_theme(image_theme)
     results: list[dict] = []
     fixture = data["fixture"]
     indices = data["indices"]
+    home_win_prob, draw_prob, away_win_prob = _extract_1x2_chances(data.get("decision_1x2"))
     pred_by_market = {"1X2": data["pred_1x2"], "TOTAL": data["pred_total"]}
     home_logo_bytes: bytes | None = None
     away_logo_bytes: bytes | None = None
     league_logo_bytes: bytes | None = None
+    image_visual_context = ImageVisualContext()
     if settings.publish_headline_image and not dry_run:
         home_logo_bytes = await _fetch_logo_bytes(getattr(fixture, "home_logo_url", None))
         away_logo_bytes = await _fetch_logo_bytes(getattr(fixture, "away_logo_url", None))
         league_logo_bytes = await _fetch_logo_bytes(getattr(fixture, "league_logo_url", None))
+        image_visual_context = await _fetch_image_visual_context(session, fixture)
 
     for market in preview.get("markets", []):
         if not market.get("headline_raw") or not market.get("analysis_raw"):
@@ -3396,6 +4040,8 @@ async def publish_fixture(
         prob = getattr(pred, "confidence", None)
         signal = getattr(pred, "signal_score", None)
         ev = _calc_ev(prob, odd)
+        implied_prob = _calc_implied_prob(odd)
+        model_edge = (float(prob) - implied_prob) if prob is not None and implied_prob is not None else None
         tier = _prediction_tier(ev, signal, experimental)
 
         for lang, channel_id in channels.items():
@@ -3404,7 +4050,7 @@ async def publish_fixture(
                     text(
                         """
                         SELECT id FROM prediction_publications
-                        WHERE fixture_id=:fid AND market=:market AND language=:lang AND status='ok'
+                        WHERE fixture_id=:fid AND market=:market AND language=:lang AND status IN ('ok', 'published')
                         ORDER BY created_at DESC
                         LIMIT 1
                         """
@@ -3444,6 +4090,22 @@ async def publish_fixture(
             local_lang = lang_key if lang_key in _LANG_TEXT else "ru"
             pack = _lang_pack(local_lang)
             bet_label = _bet_label(pack, tier)
+            indicator_title = _plain_indicator_text(
+                _variant_text(
+                    pack,
+                    "value_variants",
+                    pack.get("value_indicators", "VALUE INDICATORS"),
+                    f"{fixture_id}:{market['market']}:{local_lang}:signal_title",
+                )
+            ) or "VALUE INDICATORS"
+            bookmakers_label = _plain_indicator_text(pack.get("bookmakers_give", "Bookmakers give")) or "Bookmakers give"
+            model_label = _plain_indicator_text(pack.get("our_model", "Our model")) or "Our model"
+            edge_suffix = _plain_indicator_text(pack.get("edge_short", "edge")) or "edge"
+            indicator_line_1 = f"{bookmakers_label}: {_fmt_percent(implied_prob, 1)}"
+            indicator_line_2 = f"{model_label}: {_fmt_percent(prob, 1)}"
+            if model_edge is not None:
+                indicator_line_2 = f"{indicator_line_2} ({model_edge * 100:+.1f}% {edge_suffix})"
+            indicator_line_3 = None
             use_deepl = bool(
                 settings.publish_deepl_fallback
                 and settings.deepl_api_key
@@ -3475,8 +4137,18 @@ async def publish_fixture(
                 headline = _normalize_translated_text(headline, protected)
                 analysis = _normalize_translated_text(analysis, protected)
 
+            content_hash = _hash_content(headline, analysis)
+            idempotency_key = None
+            if not force:
+                idempotency_key = _build_idempotency_key(
+                    int(fixture_id),
+                    str(market["market"]),
+                    str(lang),
+                    int(channel_id),
+                    content_hash,
+                )
+
             if dry_run:
-                content_hash = _hash_content(headline, analysis)
                 await _record_publication(
                     session,
                     fixture_id,
@@ -3486,59 +4158,206 @@ async def publish_fixture(
                     "dry_run",
                     experimental=experimental,
                     content_hash=content_hash,
+                    idempotency_key=idempotency_key,
                     payload={
                         "dry_run": True,
                         "headline": headline,
                         "analysis": analysis,
+                        "image_theme": image_theme_norm,
                     },
                 )
                 results.append({"market": market["market"], "lang": lang, "status": "dry_run"})
                 continue
 
             try:
-                content_hash = _hash_content(headline, analysis)
+                if not force:
+                    existing_idempotent = (
+                        await session.execute(
+                            text(
+                                """
+                                SELECT id FROM prediction_publications
+                                WHERE idempotency_key=:key AND status IN ('ok', 'published')
+                                ORDER BY created_at DESC
+                                LIMIT 1
+                                """
+                            ),
+                            {"key": idempotency_key},
+                        )
+                    ).first()
+                    if existing_idempotent:
+                        await _record_publication(
+                            session,
+                            fixture_id,
+                            market["market"],
+                            lang,
+                            channel_id,
+                            "skipped",
+                            experimental=experimental,
+                            content_hash=content_hash,
+                            idempotency_key=idempotency_key,
+                            payload={"reason": "idempotent_duplicate"},
+                        )
+                        results.append(
+                            {
+                                "market": market["market"],
+                                "lang": lang,
+                                "status": "skipped",
+                                "reason": "idempotent_duplicate",
+                            }
+                        )
+                        continue
+
                 headline_parts = _split_message(headline)
                 analysis_parts = _split_message(analysis)
                 headline_ids: list[int]
                 analysis_ids: list[int]
+                used_headline_image = False
+                image_fallback_reason: str | None = None
+                html_attempted = False
+                html_render_failed = False
+                render_time_ms: int | None = None
                 if settings.publish_headline_image:
+                    html_attempted = True
                     image_text = _strip_image_probability_line(headline)
-                    image_bytes = render_headline_image(
-                        image_text,
-                        home_logo=home_logo_bytes,
-                        away_logo=away_logo_bytes,
-                        league_logo=league_logo_bytes,
-                        league_label=str(getattr(fixture, "league_name", "") or ""),
-                        market_label=("1X2" if market["market"] == "1X2" else "TOTAL" if market["market"] == "TOTAL" else str(market["market"])),
-                        bet_label=bet_label,
-                    )
-                    photo_id = await send_photo(channel_id, image_bytes)
-                    headline_ids = [photo_id]
-                    analysis_ids = await send_message_parts(
-                        channel_id,
-                        analysis_parts,
-                        reply_to_message_id=photo_id,
-                    )
-                else:
+                    common_image_kwargs = {
+                        "home_logo": home_logo_bytes,
+                        "away_logo": away_logo_bytes,
+                        "league_logo": league_logo_bytes,
+                        "league_label": str(getattr(fixture, "league_name", "") or ""),
+                        "market_label": (
+                            "1X2" if market["market"] == "1X2" else "TOTAL" if market["market"] == "TOTAL" else str(market["market"])
+                        ),
+                        "bet_label": bet_label,
+                    }
+                    html_image_kwargs = {
+                        **common_image_kwargs,
+                        "style_variant": image_theme_norm,
+                        "league_country": image_visual_context.league_country,
+                        "league_round": image_visual_context.league_round,
+                        "venue_name": image_visual_context.venue_name,
+                        "venue_city": image_visual_context.venue_city,
+                        "home_rank": image_visual_context.home_rank,
+                        "away_rank": image_visual_context.away_rank,
+                        "home_points": image_visual_context.home_points,
+                        "away_points": image_visual_context.away_points,
+                        "home_played": image_visual_context.home_played,
+                        "away_played": image_visual_context.away_played,
+                        "home_goal_diff": image_visual_context.home_goal_diff,
+                        "away_goal_diff": image_visual_context.away_goal_diff,
+                        "home_form": image_visual_context.home_form,
+                        "away_form": image_visual_context.away_form,
+                        "home_win_prob": home_win_prob,
+                        "draw_prob": draw_prob,
+                        "away_win_prob": away_win_prob,
+                        "signal_title": indicator_title,
+                        "signal_line_1": indicator_line_1,
+                        "signal_line_2": indicator_line_2,
+                        "signal_line_3": indicator_line_3,
+                    }
+                    if render_headline_image_html is not None:
+                        render_started = time.perf_counter()
+                        try:
+                            image_bytes = await asyncio.to_thread(
+                                render_headline_image_html,
+                                image_text,
+                                **html_image_kwargs,
+                            )
+                            render_time_ms = int((time.perf_counter() - render_started) * 1000)
+                            photo_id = await send_photo(channel_id, image_bytes)
+                            headline_ids = [photo_id]
+                            analysis_ids = await send_message_parts(
+                                channel_id,
+                                analysis_parts,
+                                reply_to_message_id=photo_id,
+                            )
+                            used_headline_image = True
+                        except Exception:
+                            render_time_ms = int((time.perf_counter() - render_started) * 1000)
+                            html_render_failed = True
+                            log.exception(
+                                "headline_image_html_failed fixture=%s market=%s lang=%s fallback=text",
+                                fixture_id,
+                                market["market"],
+                                lang,
+                            )
+                            image_fallback_reason = "html_render_failed"
+                            await _record_publication(
+                                session,
+                                fixture_id,
+                                market["market"],
+                                lang,
+                                channel_id,
+                                "render_failed",
+                                experimental=experimental,
+                                content_hash=content_hash,
+                                idempotency_key=idempotency_key,
+                                payload={
+                                    "reason": "html_render_failed",
+                                    "headline_image": False,
+                                    "headline_image_fallback": image_fallback_reason,
+                                    "html_attempted": True,
+                                    "html_render_failed": True,
+                                    "render_time_ms": render_time_ms,
+                                    "image_theme": image_theme_norm,
+                                },
+                            )
+                    else:
+                        html_render_failed = True
+                        log.warning(
+                            "headline_image_html_unavailable fixture=%s market=%s lang=%s fallback=text",
+                            fixture_id,
+                            market["market"],
+                            lang,
+                        )
+                        image_fallback_reason = "html_renderer_unavailable"
+                        await _record_publication(
+                            session,
+                            fixture_id,
+                            market["market"],
+                            lang,
+                            channel_id,
+                            "render_failed",
+                            experimental=experimental,
+                            content_hash=content_hash,
+                            idempotency_key=idempotency_key,
+                            payload={
+                                "reason": "html_renderer_unavailable",
+                                "headline_image": False,
+                                "headline_image_fallback": image_fallback_reason,
+                                "html_attempted": True,
+                                "html_render_failed": True,
+                                "render_time_ms": render_time_ms,
+                                "image_theme": image_theme_norm,
+                            },
+                        )
+
+                if not used_headline_image:
                     headline_ids = await send_message_parts(channel_id, headline_parts)
                     analysis_ids = await send_message_parts(channel_id, analysis_parts)
+
                 await _record_publication(
                     session,
                     fixture_id,
                     market["market"],
                     lang,
                     channel_id,
-                    "ok",
+                    "published",
                     experimental=experimental,
                     headline_message_id=headline_ids[0] if headline_ids else None,
                     analysis_message_id=analysis_ids[0] if analysis_ids else None,
                     content_hash=content_hash,
+                    idempotency_key=idempotency_key,
                     payload={
                         "headline": headline,
                         "analysis": analysis,
                         "headline_ids": headline_ids,
                         "analysis_ids": analysis_ids,
-                        "headline_image": bool(settings.publish_headline_image),
+                        "headline_image": used_headline_image,
+                        "headline_image_fallback": image_fallback_reason,
+                        "html_attempted": html_attempted,
+                        "html_render_failed": html_render_failed,
+                        "render_time_ms": render_time_ms,
+                        "image_theme": image_theme_norm,
                     },
                 )
                 results.append({"market": market["market"], "lang": lang, "status": "ok"})
@@ -3549,8 +4368,10 @@ async def publish_fixture(
                     market["market"],
                     lang,
                     channel_id,
-                    "failed",
+                    "send_failed",
                     experimental=experimental,
+                    content_hash=content_hash,
+                    idempotency_key=idempotency_key,
                     payload={"reason": "send_failed"},
                     error=str(exc),
                 )
@@ -3558,4 +4379,10 @@ async def publish_fixture(
                 log.exception("publish_failed fixture=%s market=%s lang=%s", fixture_id, market["market"], lang)
 
     await session.commit()
-    return {"fixture_id": fixture_id, "mode": mode, "dry_run": dry_run, "results": results}
+    return {
+        "fixture_id": fixture_id,
+        "mode": mode,
+        "dry_run": dry_run,
+        "image_theme": image_theme_norm,
+        "results": results,
+    }

@@ -35,12 +35,25 @@ load_dotenv()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.services.math_utils import (
+    DEFAULT_ELO,
+    ELO_K,
+    elo_expected as _elo_expected,
+    match_probs_poisson as _match_probs,
+    poisson_pmf as _poisson_pmf,
+    power_scale as _power_scale_list,
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 log = logging.getLogger("backtest")
+
+
+def _power_scale(probs: list[float], alpha: float) -> list[float]:
+    return _power_scale_list(probs, alpha)
 
 
 # ---------------------------------------------------------------------------
@@ -51,52 +64,6 @@ def _get_conn(dsn: str):
     import psycopg2
     dsn = dsn.replace("postgresql+asyncpg://", "postgresql://")
     return psycopg2.connect(dsn)
-
-
-# ---------------------------------------------------------------------------
-# Poisson helpers (same as train_model.py)
-# ---------------------------------------------------------------------------
-
-DEFAULT_ELO = 1500.0
-ELO_K = 20.0
-
-
-def _elo_expected(rating: float, opp_rating: float) -> float:
-    return 1.0 / (1.0 + 10.0 ** ((opp_rating - rating) / 400.0))
-
-
-def _poisson_pmf(k: int, lam: float) -> float:
-    if lam <= 0:
-        return 1.0 if k == 0 else 0.0
-    return (lam ** k) * math.exp(-lam) / math.factorial(k)
-
-
-def _match_probs(lam_h: float, lam_a: float, k_max: int = 8) -> tuple[float, float, float]:
-    p_h, p_d, p_a = 0.0, 0.0, 0.0
-    for i in range(k_max + 1):
-        pi = _poisson_pmf(i, lam_h)
-        for j in range(k_max + 1):
-            pj = _poisson_pmf(j, lam_a)
-            prob = pi * pj
-            if i > j:
-                p_h += prob
-            elif i == j:
-                p_d += prob
-            else:
-                p_a += prob
-    total = p_h + p_d + p_a
-    if total > 0:
-        p_h /= total
-        p_d /= total
-        p_a /= total
-    return p_h, p_d, p_a
-
-
-def _power_scale(probs: list[float], alpha: float) -> list[float]:
-    eps = 1e-15
-    scaled = [max(eps, p) ** alpha for p in probs]
-    total = sum(scaled)
-    return [s / total for s in scaled] if total > 0 else probs
 
 
 # ---------------------------------------------------------------------------

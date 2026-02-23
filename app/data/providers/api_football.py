@@ -394,6 +394,18 @@ async def get_fixtures_by_season(session: AsyncSession, league_id: int, season: 
     )
 
 
+async def get_fixture_by_id(session: AsyncSession, fixture_id: int, *, metric_league_id: int | None = None):
+    params = {"id": int(fixture_id), "timezone": "UTC"}
+    return await api_get(
+        session,
+        "/fixtures",
+        params,
+        ttl_seconds=6 * 3600,
+        cache_tag="fixture_by_id_v1",
+        metric_league_id=metric_league_id,
+    )
+
+
 async def get_odds_by_season(session: AsyncSession, league_id: int, season: int, bookmaker_ids: list[int]):
     bookmaker_param = ",".join(str(b) for b in bookmaker_ids)
     params = {"league": league_id, "season": season, "bookmaker": bookmaker_param}

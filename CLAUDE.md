@@ -82,12 +82,13 @@ asyncio.run(test())
 
 ### Core Components
 
-**Data Pipeline**: Five-stage automated pipeline for football predictions:
-1. `sync_data` - Fetch fixtures, odds, and standings from API Football
-2. `compute_indices` - Calculate team ratings using ELO system and form metrics
-3. `build_predictions` - Generate ML predictions with Expected Value calculations
-4. `evaluate_results` - Settle predictions and calculate performance metrics
-5. `maintenance` - Clean up old data and manage retention
+**Data Pipeline**: Six-stage automated pipeline for football predictions:
+1. `sync_data` - Fetch fixtures, odds, standings, injuries from API Football
+2. `compute_indices` - Calculate team ratings (ELO, form, xG rolling averages)
+3. `fit_dixon_coles` - Fit DC model per league (goals + xG dual-mode)
+4. `build_predictions` - Generate ML predictions (DC → Stacking → EV calc)
+5. `evaluate_results` - Settle predictions and calculate performance metrics
+6. `maintenance` - Clean up old data and manage retention
 
 **Scheduler Architecture**:
 - Production uses separate `app` (API only) and `scheduler` (jobs only) services
@@ -116,9 +117,21 @@ asyncio.run(test())
 - Advisory locking prevents concurrent execution
 
 **Services Layer** (`app/services/`):
-- ELO rating calculations
-- External API integrations (API Football)
-- Data processing utilities
+- `dixon_coles.py` - Dixon-Coles model fitting (dual-mode: goals + xG)
+- `elo_ratings.py` - ELO rating calculations (home advantage, goal-diff, regression)
+- `stacking.py` - Stacking meta-model inference (softmax regression, 13 features)
+- `calibration.py` - Dirichlet calibration (optional post-stacking)
+- `poisson.py` - Poisson/DC probability calculations (Decimal-based)
+- `kelly.py` - Kelly criterion bet sizing
+- `odds_utils.py` - Overround removal for fair implied probabilities
+- `metrics.py` - RPS, Brier, LogLoss scoring functions
+
+**Prediction Pipeline** (`app/jobs/build_predictions.py`):
+- Three-level model selection: Stacking (primary) → DC-only (fallback) → Poisson (baseline)
+- DC always enabled, fit via `fit_dixon_coles` job (goals + xG modes)
+- Stacking uses 13 features: 3 Poisson + 3 DC-goals + 3 DC-xG + elo_diff + 3 fair odds
+- Optional Dirichlet calibration post-stacking (USE_DIRICHLET_CALIB)
+- EV calculation: `model_prob * bookie_odd - 1` (unchanged)
 
 ### Frontend Architecture
 

@@ -12,8 +12,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.decimalutils import D
 from app.core.logger import get_logger
 from app.core.timeutils import utcnow
+from app.services.metrics import ranked_probability_score
 
 logger = get_logger("jobs.quality_report")
 
@@ -61,6 +63,10 @@ class BetRow:
     status: str
     profit: Decimal
     closing_odd: Decimal | None
+    feature_flags: dict | None = None
+    home_goals: int | None = None
+    away_goals: int | None = None
+    market: str = "1X2"
 
 
 def _odds_bucket(odd: Decimal) -> str:
@@ -219,6 +225,7 @@ def _build_shadow_filters(
     base_clv_cov = float(base_summary.get("clv_cov_pct") or 0.0)
     base_brier = float(base_calibration.get("brier") or 0.0)
     base_logloss = float(base_calibration.get("logloss") or 0.0)
+    base_rps = float(base_calibration.get("rps") or 0.0)
 
     for item in defs:
         filters = {
@@ -241,6 +248,7 @@ def _build_shadow_filters(
             "clv_cov_pct": float(summary.get("clv_cov_pct") or 0.0) - base_clv_cov,
             "brier": float(calibration.get("brier") or 0.0) - base_brier,
             "logloss": float(calibration.get("logloss") or 0.0) - base_logloss,
+            "rps": float(calibration.get("rps") or 0.0) - base_rps,
         }
         out.append(
             {
@@ -255,17 +263,41 @@ def _build_shadow_filters(
     return out
 
 
+def _outcome_index(home_goals: int | None, away_goals: int | None) -> int | None:
+    """Determine outcome index from final score. 0=home, 1=draw, 2=away."""
+    if home_goals is None or away_goals is None:
+        return None
+    if home_goals > away_goals:
+        return 0
+    elif home_goals == away_goals:
+        return 1
+    else:
+        return 2
+
+
 def _calibration(rows: list[BetRow]) -> dict:
     if not rows:
-        return {"brier": 0.0, "logloss": 0.0, "bins": []}
+        return {"brier": 0.0, "logloss": 0.0, "rps": 0.0, "bins": []}
     brier_sum = 0.0
     logloss_sum = 0.0
+    rps_sum = 0.0
+    rps_count = 0
     bins: dict[int, list[BetRow]] = defaultdict(list)
     for r in rows:
         p = _safe_prob(r.prob)
         y = 1.0 if r.status == "WIN" else 0.0
         brier_sum += (p - y) ** 2
         logloss_sum += -(y * log(p) + (1 - y) * log(1 - p))
+        # RPS from full distribution in feature_flags + actual outcome from goals
+        ff = r.feature_flags
+        oi = _outcome_index(r.home_goals, r.away_goals)
+        if ff and oi is not None and "p_home" in ff and "p_draw" in ff and "p_away" in ff:
+            p_h = D(str(ff["p_home"]))
+            p_d = D(str(ff["p_draw"]))
+            p_a = D(str(ff["p_away"]))
+            if p_h + p_d + p_a > 0:
+                rps_sum += float(ranked_probability_score((p_h, p_d, p_a), oi))
+                rps_count += 1
         bin_idx = min(int(p * 10), 9)
         bins[bin_idx].append(r)
     out_bins = []
@@ -286,6 +318,7 @@ def _calibration(rows: list[BetRow]) -> dict:
     return {
         "brier": brier_sum / len(rows),
         "logloss": logloss_sum / len(rows),
+        "rps": rps_sum / rps_count if rps_count else 0.0,
         "bins": out_bins,
     }
 
@@ -299,12 +332,15 @@ async def _fetch_1x2(session: AsyncSession) -> list[BetRow]:
               f.league_id AS league_id,
               COALESCE(l.name, '') AS league_name,
               f.kickoff AS kickoff,
+              f.home_goals AS home_goals,
+              f.away_goals AS away_goals,
               p.created_at AS created_at,
               p.selection_code AS selection,
               p.initial_odd AS odd,
               p.confidence AS prob,
               p.status AS status,
               p.profit AS profit,
+              p.feature_flags AS feature_flags,
               o.home_win AS close_home,
               o.draw AS close_draw,
               o.away_win AS close_away
@@ -336,6 +372,7 @@ async def _fetch_1x2(session: AsyncSession) -> list[BetRow]:
             closing = r.close_draw
         else:
             closing = r.close_away
+        ff = r.feature_flags if isinstance(r.feature_flags, dict) else None
         rows.append(
             BetRow(
                 fixture_id=int(r.fixture_id),
@@ -349,6 +386,9 @@ async def _fetch_1x2(session: AsyncSession) -> list[BetRow]:
                 status=r.status,
                 profit=Decimal(r.profit) if r.profit is not None else Decimal(0),
                 closing_odd=Decimal(closing) if closing is not None else None,
+                feature_flags=ff,
+                home_goals=r.home_goals,
+                away_goals=r.away_goals,
             )
         )
     return rows
@@ -364,18 +404,31 @@ async def _fetch_totals(session: AsyncSession) -> list[BetRow]:
               COALESCE(l.name, '') AS league_name,
               f.kickoff AS kickoff,
               pt.created_at AS created_at,
+              pt.market AS market,
               pt.selection AS selection,
               pt.initial_odd AS odd,
               pt.confidence AS prob,
               pt.status AS status,
               pt.profit AS profit,
               o.over_2_5 AS close_over,
-              o.under_2_5 AS close_under
+              o.under_2_5 AS close_under,
+              o.over_1_5 AS close_over_1_5,
+              o.under_1_5 AS close_under_1_5,
+              o.over_3_5 AS close_over_3_5,
+              o.under_3_5 AS close_under_3_5,
+              o.btts_yes AS close_btts_yes,
+              o.btts_no AS close_btts_no,
+              o.dc_1x AS close_dc_1x,
+              o.dc_x2 AS close_dc_x2,
+              o.dc_12 AS close_dc_12
             FROM predictions_totals pt
             JOIN fixtures f ON f.id=pt.fixture_id
             LEFT JOIN leagues l ON l.id=f.league_id
             LEFT JOIN LATERAL (
-              SELECT over_2_5, under_2_5
+              SELECT over_2_5, under_2_5,
+                     over_1_5, under_1_5, over_3_5, under_3_5,
+                     btts_yes, btts_no,
+                     dc_1x, dc_x2, dc_12
               FROM odds_snapshots os
               WHERE os.fixture_id=f.id
                 AND os.bookmaker_id=:bid
@@ -383,18 +436,24 @@ async def _fetch_totals(session: AsyncSession) -> list[BetRow]:
               ORDER BY os.fetched_at DESC
               LIMIT 1
             ) o ON TRUE
-            WHERE pt.market='TOTAL'
-              AND pt.selection IN ('OVER_2_5','UNDER_2_5')
-              AND pt.status IN ('WIN','LOSS')
+            WHERE pt.status IN ('WIN','LOSS')
               AND pt.initial_odd IS NOT NULL
             ORDER BY f.kickoff DESC
             """
         ),
         {"bid": settings.bookmaker_id},
     )
+    _closing_map = {
+        "OVER_2_5": "close_over", "UNDER_2_5": "close_under",
+        "OVER_1_5": "close_over_1_5", "UNDER_1_5": "close_under_1_5",
+        "OVER_3_5": "close_over_3_5", "UNDER_3_5": "close_under_3_5",
+        "BTTS_YES": "close_btts_yes", "BTTS_NO": "close_btts_no",
+        "DC_1X": "close_dc_1x", "DC_X2": "close_dc_x2", "DC_12": "close_dc_12",
+    }
     rows: list[BetRow] = []
     for r in res.fetchall():
-        closing = r.close_over if r.selection == "OVER_2_5" else r.close_under
+        col = _closing_map.get(r.selection)
+        closing = getattr(r, col, None) if col else None
         rows.append(
             BetRow(
                 fixture_id=int(r.fixture_id),
@@ -408,6 +467,7 @@ async def _fetch_totals(session: AsyncSession) -> list[BetRow]:
                 status=r.status,
                 profit=Decimal(r.profit) if r.profit is not None else Decimal(0),
                 closing_odd=Decimal(closing) if closing is not None else None,
+                market=r.market,
             )
         )
     return rows
@@ -428,10 +488,18 @@ def _league_group(rows: list[BetRow]) -> list[dict]:
 
 async def run(session: AsyncSession) -> dict:
     one_x2 = await _fetch_1x2(session)
-    totals = await _fetch_totals(session)
+    all_totals = await _fetch_totals(session)
 
     summary_1x2 = _summarize(one_x2)
     calibration_1x2 = _calibration(one_x2)
+
+    # Group totals by market for per-market reporting
+    totals_by_market: dict[str, list[BetRow]] = {}
+    for r in all_totals:
+        totals_by_market.setdefault(r.market, []).append(r)
+
+    # Legacy "total" key: only TOTAL market rows (backward compat)
+    totals = totals_by_market.get("TOTAL", [])
     summary_total = _summarize(totals)
     calibration_total = _calibration(totals)
 
@@ -455,6 +523,19 @@ async def run(session: AsyncSession) -> dict:
             "shadow_filters": _build_shadow_filters(totals, "total", summary_total, calibration_total),
         },
     }
+
+    # Add per-market sections for new markets
+    for market_name in ["TOTAL_1_5", "TOTAL_3_5", "BTTS", "DOUBLE_CHANCE"]:
+        mkt_rows = totals_by_market.get(market_name, [])
+        if mkt_rows:
+            mkt_summary = _summarize(mkt_rows)
+            mkt_cal = _calibration(mkt_rows)
+            report[market_name.lower()] = {
+                "summary": mkt_summary,
+                "by_league": _league_group(mkt_rows),
+                "by_odds_bucket": _group(mkt_rows, lambda r: _odds_bucket(r.odd), order=ODDS_BUCKETS),
+                "calibration": mkt_cal,
+            }
 
     logger.info(
         "quality_report summary_1x2=%s summary_total=%s",

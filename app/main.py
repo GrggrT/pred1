@@ -16,7 +16,9 @@ from apscheduler.triggers.interval import IntervalTrigger
 import logging
 from pathlib import Path
 from fastapi import FastAPI, Depends, Query, Header, HTTPException, Response, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 from sqlalchemy import text, bindparam
 from sqlalchemy.types import Integer, DateTime as SADateTime, String as SAString
@@ -28,11 +30,13 @@ from app.core.http import init_http_clients, close_http_clients
 from app.jobs import build_predictions, compute_indices, evaluate_results, sync_data, quality_report
 from app.jobs import maintenance
 from app.jobs import rebuild_elo
+from app.jobs import fit_dixon_coles
 from app.core.timeutils import utcnow, ensure_aware_utc
 from app.services.elo_ratings import get_team_rating
 from app.services.api_football_quota import api_football_usage_since, quota_guard_decision, utc_day_window
 from app.services import info_report
 from app.services import publishing
+from app.data.providers.api_football import get_fixtures, set_force_refresh, reset_force_refresh
 
 scheduler = AsyncIOScheduler()
 logger = logging.getLogger(__name__)
@@ -50,6 +54,9 @@ JOB_STATUS: dict[str, dict] = {}
 PIPELINE_STATUS: dict[str, object] = {}
 RUN_NOW_RATE: dict[str, list[float]] = {}
 RUN_NOW_LAST: dict[str, float] = {}
+PUBLIC_API_RATE: dict[str, list[float]] = {}
+RECENT_FIXTURE_REFRESH_LOCK = asyncio.Lock()
+RECENT_FIXTURE_REFRESH_LAST_AT: datetime | None = None
 
 
 def _file_sha256_hex(path: Path) -> str | None:
@@ -100,6 +107,17 @@ def _require_admin(x_admin_token: str | None = Header(default=None, alias="X-Adm
         raise HTTPException(status_code=403, detail="Admin token is not configured")
     if x_admin_token != token:
         raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def _check_public_rate(request: Request):
+    ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    cutoff = now - 60
+    hits = PUBLIC_API_RATE.get(ip, [])
+    PUBLIC_API_RATE[ip] = [t for t in hits if t > cutoff]
+    if len(PUBLIC_API_RATE[ip]) >= 60:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": "60"})
+    PUBLIC_API_RATE[ip].append(now)
 
 
 def _invalid_api_key() -> bool:
@@ -158,6 +176,235 @@ def _create_task(coro, *, label: str):
     return task
 
 
+async def _auto_settle_finished_bets(session: AsyncSession) -> dict[str, int]:
+    """Settle pending bets for finished/cancelled fixtures to avoid stale history lag."""
+    settled_1x2 = 0
+    settled_totals = 0
+    try:
+        res_1x2 = await session.execute(
+            text(
+                """
+                UPDATE predictions p
+                SET
+                  status = CASE
+                    WHEN f.status IN ('CANC', 'ABD', 'AWD', 'WO') THEN 'VOID'
+                    WHEN f.home_goals IS NULL OR f.away_goals IS NULL THEN 'VOID'
+                    WHEN (
+                      (f.home_goals > f.away_goals AND p.selection_code = 'HOME_WIN')
+                      OR (f.home_goals = f.away_goals AND p.selection_code = 'DRAW')
+                      OR (f.home_goals < f.away_goals AND p.selection_code = 'AWAY_WIN')
+                    ) THEN 'WIN'
+                    ELSE 'LOSS'
+                  END,
+                  profit = CASE
+                    WHEN f.status IN ('CANC', 'ABD', 'AWD', 'WO') THEN 0::numeric
+                    WHEN f.home_goals IS NULL OR f.away_goals IS NULL OR p.initial_odd IS NULL THEN 0::numeric
+                    WHEN (
+                      (f.home_goals > f.away_goals AND p.selection_code = 'HOME_WIN')
+                      OR (f.home_goals = f.away_goals AND p.selection_code = 'DRAW')
+                      OR (f.home_goals < f.away_goals AND p.selection_code = 'AWAY_WIN')
+                    ) THEN (p.initial_odd - 1)
+                    ELSE (-1)::numeric
+                  END,
+                  settled_at = now()
+                FROM fixtures f
+                WHERE f.id = p.fixture_id
+                  AND p.selection_code != 'SKIP'
+                  AND p.status = 'PENDING'
+                  AND f.status IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO')
+                """
+            )
+        )
+        settled_1x2 = int(getattr(res_1x2, "rowcount", 0) or 0)
+
+        res_totals = await session.execute(
+            text(
+                """
+                UPDATE predictions_totals pt
+                SET
+                  status = CASE
+                    WHEN f.status IN ('CANC', 'ABD', 'AWD', 'WO') THEN 'VOID'
+                    WHEN f.home_goals IS NULL OR f.away_goals IS NULL THEN 'VOID'
+                    WHEN (
+                      (pt.selection = 'OVER_2_5' AND (f.home_goals + f.away_goals) >= 3)
+                      OR (pt.selection = 'UNDER_2_5' AND (f.home_goals + f.away_goals) <= 2)
+                    ) THEN 'WIN'
+                    WHEN pt.selection IN ('OVER_2_5', 'UNDER_2_5') THEN 'LOSS'
+                    ELSE 'VOID'
+                  END,
+                  profit = CASE
+                    WHEN f.status IN ('CANC', 'ABD', 'AWD', 'WO') THEN 0::numeric
+                    WHEN f.home_goals IS NULL OR f.away_goals IS NULL OR pt.initial_odd IS NULL THEN 0::numeric
+                    WHEN (
+                      (pt.selection = 'OVER_2_5' AND (f.home_goals + f.away_goals) >= 3)
+                      OR (pt.selection = 'UNDER_2_5' AND (f.home_goals + f.away_goals) <= 2)
+                    ) THEN (pt.initial_odd - 1)
+                    WHEN pt.selection IN ('OVER_2_5', 'UNDER_2_5') THEN (-1)::numeric
+                    ELSE 0::numeric
+                  END,
+                  settled_at = now()
+                FROM fixtures f
+                WHERE f.id = pt.fixture_id
+                  AND pt.market = 'TOTAL'
+                  AND COALESCE(pt.status, 'PENDING') = 'PENDING'
+                  AND f.status IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO')
+                """
+            )
+        )
+        settled_totals = int(getattr(res_totals, "rowcount", 0) or 0)
+
+        if settled_1x2 or settled_totals:
+            await session.commit()
+            logger.info("auto_settle_finished_bets settled_1x2=%s settled_totals=%s", settled_1x2, settled_totals)
+    except Exception:
+        await session.rollback()
+        logger.exception("auto_settle_finished_bets_failed")
+    return {"settled_1x2": settled_1x2, "settled_totals": settled_totals}
+
+
+def _has_valid_api_football_key() -> bool:
+    key = (settings.api_football_key or "").strip()
+    return key not in {"", "YOUR_KEY", "your_paid_key"}
+
+
+async def _recent_active_league_ids(
+    session: AsyncSession,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    limit: int = 20,
+) -> list[int]:
+    stmt = (
+        text(
+            """
+            SELECT DISTINCT f.league_id
+            FROM fixtures f
+            WHERE f.league_id IS NOT NULL
+              AND f.kickoff >= :window_start
+              AND f.kickoff <= :window_end
+              AND COALESCE(f.status, 'UNK') NOT IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO')
+              AND (
+                EXISTS (
+                  SELECT 1
+                  FROM predictions p
+                  WHERE p.fixture_id = f.id
+                    AND p.selection_code != 'SKIP'
+                    AND COALESCE(p.status, 'PENDING') = 'PENDING'
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM predictions_totals pt
+                  WHERE pt.fixture_id = f.id
+                    AND pt.market = 'TOTAL'
+                    AND COALESCE(pt.status, 'PENDING') = 'PENDING'
+                )
+              )
+            ORDER BY f.league_id
+            LIMIT :limit
+            """
+        ).bindparams(
+            bindparam("window_start", type_=SADateTime(timezone=True)),
+            bindparam("window_end", type_=SADateTime(timezone=True)),
+            bindparam("limit", type_=Integer),
+        )
+    )
+    res = await session.execute(
+        stmt,
+        {
+            "window_start": window_start,
+            "window_end": window_end,
+            "limit": int(limit),
+        },
+    )
+    out: list[int] = []
+    for row in res.fetchall():
+        try:
+            lid = int(row.league_id)
+        except Exception:
+            continue
+        out.append(lid)
+    return out
+
+
+def _season_candidates_for_now(now_utc: datetime) -> list[int]:
+    out: list[int] = []
+    raw = [int(getattr(settings, "season", 0) or 0), now_utc.year - 1, now_utc.year, now_utc.year + 1]
+    for item in raw:
+        try:
+            v = int(item)
+        except Exception:
+            continue
+        if v < 2000:
+            continue
+        if v not in out:
+            out.append(v)
+    return out
+
+
+async def _refresh_recent_fixture_statuses(session: AsyncSession) -> dict[str, int | bool]:
+    """
+    Refresh near-now fixtures with force-refresh (short throttled cadence) so UI doesn't
+    lag on NS/PENDING cache when matches are already live/finished.
+    """
+    global RECENT_FIXTURE_REFRESH_LAST_AT
+    if not _has_valid_api_football_key():
+        return {"refreshed": False, "leagues": 0, "fixtures_upserted": 0}
+
+    now_utc = utcnow()
+    min_interval_seconds = 90
+    window_start = now_utc - timedelta(hours=8)
+    window_end = now_utc + timedelta(hours=8)
+
+    if RECENT_FIXTURE_REFRESH_LAST_AT is not None:
+        age = (now_utc - RECENT_FIXTURE_REFRESH_LAST_AT).total_seconds()
+        if age < min_interval_seconds:
+            return {"refreshed": False, "leagues": 0, "fixtures_upserted": 0}
+
+    async with RECENT_FIXTURE_REFRESH_LOCK:
+        now_utc = utcnow()
+        if RECENT_FIXTURE_REFRESH_LAST_AT is not None:
+            age = (now_utc - RECENT_FIXTURE_REFRESH_LAST_AT).total_seconds()
+            if age < min_interval_seconds:
+                return {"refreshed": False, "leagues": 0, "fixtures_upserted": 0}
+
+        league_ids = await _recent_active_league_ids(
+            session,
+            window_start=window_start,
+            window_end=window_end,
+            limit=20,
+        )
+        if not league_ids:
+            RECENT_FIXTURE_REFRESH_LAST_AT = now_utc
+            return {"refreshed": False, "leagues": 0, "fixtures_upserted": 0}
+
+        token = set_force_refresh(True)
+        upserted = 0
+        seasons = _season_candidates_for_now(now_utc)
+        try:
+            for lid in league_ids:
+                data = None
+                for season in seasons:
+                    probe = await get_fixtures(session, lid, season, window_start, window_end)
+                    if probe.get("response"):
+                        data = probe
+                        break
+                if data is None:
+                    data = {"response": []}
+                for item in data.get("response", []):
+                    await sync_data._upsert_fixture(session, item)
+                    upserted += 1
+            await session.commit()
+            RECENT_FIXTURE_REFRESH_LAST_AT = now_utc
+            logger.info("recent_fixture_status_refresh leagues=%s fixtures_upserted=%s", len(league_ids), upserted)
+            return {"refreshed": True, "leagues": len(league_ids), "fixtures_upserted": upserted}
+        except Exception:
+            await session.rollback()
+            logger.exception("recent_fixture_status_refresh_failed")
+            return {"refreshed": False, "leagues": 0, "fixtures_upserted": 0}
+        finally:
+            reset_force_refresh(token)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_db()
@@ -195,6 +442,9 @@ async def lifespan(_: FastAPI):
 
         async def _scheduled_quality_report():
             await _run_job("quality_report", quality_report.run, triggered_by="scheduler")
+
+        async def _scheduled_fit_dixon_coles():
+            await _run_job("fit_dixon_coles", fit_dixon_coles.run, triggered_by="scheduler")
 
         scheduler.add_job(
             _scheduled_sync_data,
@@ -244,6 +494,14 @@ async def lifespan(_: FastAPI):
             coalesce=True,
             misfire_grace_time=300,
         )
+        scheduler.add_job(
+            _scheduled_fit_dixon_coles,
+            CronTrigger.from_crontab(settings.job_fit_dixon_coles_cron),
+            id="fit_dixon_coles",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
         if settings.snapshot_autofill_enabled:
             scheduler.add_job(
                 _snapshot_autofill_tick,
@@ -271,6 +529,51 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Fatigue & Chaos MVP", lifespan=lifespan)
+
+# CORS — allow public API from any origin (read-only)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+    expose_headers=["X-Total-Count"],
+)
+
+
+# Security headers middleware
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        # CSP for new frontends
+        if path == "/" or path.startswith("/public") or path.startswith("/shared"):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com; "
+                "img-src 'self' https://media.api-sports.io data:; "
+                "connect-src 'self'; "
+                "frame-ancestors 'none'"
+            )
+        elif path.startswith("/admin"):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com; "
+                "img-src 'self' https://media.api-sports.io data:; "
+                "connect-src 'self'; "
+                "frame-ancestors 'none'"
+            )
+        # Common security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 async def _snapshot_autofill_tick():
@@ -684,6 +987,8 @@ async def _run_pipeline(triggered_by: str | None = None, meta: Optional[dict] = 
                         st = time.perf_counter()
                         meta["compute_indices"] = {"result": await compute_indices.run(session), "duration_ms": int((time.perf_counter() - st) * 1000)}
                         st = time.perf_counter()
+                        meta["fit_dixon_coles"] = {"result": await fit_dixon_coles.run(session), "duration_ms": int((time.perf_counter() - st) * 1000)}
+                        st = time.perf_counter()
                         meta["build_predictions"] = {"result": await build_predictions.run(session), "duration_ms": int((time.perf_counter() - st) * 1000)}
                         st = time.perf_counter()
                         meta["evaluate_results"] = {"result": await evaluate_results.run(session), "duration_ms": int((time.perf_counter() - st) * 1000)}
@@ -758,6 +1063,7 @@ async def _run_single(job_name: str, triggered_by: str | None = None, meta: Opti
         "maintenance": maintenance.run,
         "rebuild_elo": rebuild_elo.run,
         "quality_report": quality_report.run,
+        "fit_dixon_coles": fit_dixon_coles.run,
     }
     job_fn = jobs.get(job_name)
     if not job_fn:
@@ -818,8 +1124,9 @@ async def api_run_now(
 
 
 @app.get("/", include_in_schema=False)
-async def root_redirect():
-    return RedirectResponse(url="/ui")
+async def public_root():
+    path = BASE_DIR / "public_site" / "index.html"
+    return FileResponse(path, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/v1/picks")
@@ -836,10 +1143,17 @@ async def api_picks(
     response: Response,
     session: AsyncSession = Depends(get_session),
 ):
+    now_utc = utcnow()
+    try:
+        await _refresh_recent_fixture_statuses(session)
+    except Exception:
+        logger.exception("api_picks_recent_refresh_failed")
+    live_lookback_hours = 8
     if date_from is None:
-        date_from = utcnow()
+        date_from = now_utc - timedelta(hours=live_lookback_hours)
     if date_to is None:
-        date_to = utcnow() + timedelta(days=7)
+        date_to = now_utc + timedelta(days=7)
+    stale_ns_hours = int(getattr(settings, "stale_ns_hide_hours", 6) or 0)
 
     sort = (sort or "kickoff_desc").lower()
     if sort not in {"kickoff_desc", "ev_desc", "signal_desc", "profit_desc"}:
@@ -863,6 +1177,12 @@ async def api_picks(
           AND (:league_id IS NULL OR f.league_id=:league_id)
           AND (:date_from IS NULL OR f.kickoff >= :date_from)
           AND (:date_to IS NULL OR f.kickoff <= :date_to)
+          AND COALESCE(f.status, 'UNK') NOT IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO')
+          AND (
+            CAST(:stale_ns_hours AS int) <= 0
+            OR COALESCE(f.status, 'UNK') <> 'NS'
+            OR f.kickoff >= (CAST(:now_utc AS timestamptz) - (CAST(:stale_ns_hours AS int) * interval '1 hour'))
+          )
           AND (p.signal_score IS NULL OR p.signal_score >= :min_signal)
           AND COALESCE(p.status, 'PENDING') = 'PENDING'
         """
@@ -870,13 +1190,22 @@ async def api_picks(
             bindparam("league_id", type_=Integer),
             bindparam("date_from", type_=SADateTime(timezone=True)),
             bindparam("date_to", type_=SADateTime(timezone=True)),
+            bindparam("now_utc", type_=SADateTime(timezone=True)),
+            bindparam("stale_ns_hours", type_=Integer),
             bindparam("min_signal"),
         )
     )
     cnt_row = (
         await session.execute(
             count_stmt,
-            {"league_id": league_id, "date_from": date_from, "date_to": date_to, "min_signal": min_signal_score},
+            {
+                "league_id": league_id,
+                "date_from": date_from,
+                "date_to": date_to,
+                "now_utc": now_utc,
+                "stale_ns_hours": stale_ns_hours,
+                "min_signal": min_signal_score,
+            },
         )
     ).first()
     response.headers["X-Total-Count"] = str(int(cnt_row.cnt or 0) if cnt_row else 0)
@@ -887,7 +1216,16 @@ async def api_picks(
         SELECT p.fixture_id, f.kickoff, th.name as home_name, ta.name as away_name,
                th.logo_url AS home_logo_url, ta.logo_url AS away_logo_url,
                f.league_id, l.name as league, l.logo_url AS league_logo_url,
-               f.status AS fixture_status, f.home_goals, f.away_goals,
+               f.status AS fixture_status,
+               CASE
+                 WHEN COALESCE(f.status, 'UNK') IN ('LIVE', '1H', 'HT', '2H', 'ET', 'BT', 'P', 'INT')
+                   THEN GREATEST(
+                     0,
+                     CAST(EXTRACT(EPOCH FROM (CAST(:now_utc AS timestamptz) - f.kickoff)) / 60 AS int)
+                   )
+                 ELSE NULL
+               END AS fixture_minute,
+               f.home_goals, f.away_goals,
                p.selection_code, p.initial_odd, p.confidence, p.value_index, p.status AS bet_status, p.profit,
                elh.rating AS elo_home, ela.rating AS elo_away, p.signal_score,
                o.market_avg_home_win, o.market_avg_draw, o.market_avg_away_win,
@@ -904,6 +1242,12 @@ async def api_picks(
           AND (:league_id IS NULL OR f.league_id=:league_id)
           AND (:date_from IS NULL OR f.kickoff >= :date_from)
           AND (:date_to IS NULL OR f.kickoff <= :date_to)
+          AND COALESCE(f.status, 'UNK') NOT IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO')
+          AND (
+            CAST(:stale_ns_hours AS int) <= 0
+            OR COALESCE(f.status, 'UNK') <> 'NS'
+            OR f.kickoff >= (CAST(:now_utc AS timestamptz) - (CAST(:stale_ns_hours AS int) * interval '1 hour'))
+          )
           AND (p.signal_score IS NULL OR p.signal_score >= :min_signal)
           AND COALESCE(p.status, 'PENDING') = 'PENDING'
         ORDER BY {order_by}
@@ -913,6 +1257,8 @@ async def api_picks(
             bindparam("league_id", type_=Integer),
             bindparam("date_from", type_=SADateTime(timezone=True)),
             bindparam("date_to", type_=SADateTime(timezone=True)),
+            bindparam("now_utc", type_=SADateTime(timezone=True)),
+            bindparam("stale_ns_hours", type_=Integer),
             bindparam("min_signal"),
             bindparam("limit", type_=Integer),
             bindparam("offset", type_=Integer),
@@ -925,6 +1271,8 @@ async def api_picks(
             "league_id": league_id,
             "date_from": date_from,
             "date_to": date_to,
+            "now_utc": now_utc,
+            "stale_ns_hours": stale_ns_hours,
             "min_signal": min_signal_score,
             "limit": limit,
             "offset": offset,
@@ -969,6 +1317,7 @@ async def api_picks(
                 "league": row.league if getattr(row, "league", None) is not None else None,
                 "league_logo_url": row.league_logo_url if getattr(row, "league_logo_url", None) is not None else None,
                 "fixture_status": row.fixture_status,
+                "fixture_minute": int(row.fixture_minute) if getattr(row, "fixture_minute", None) is not None else None,
                 "pick": row.selection_code,
                 "odd": float(row.initial_odd) if row.initial_odd is not None else None,
                 "confidence": float(row.confidence) if row.confidence is not None else None,
@@ -995,6 +1344,7 @@ async def api_picks_totals(
     league_id: Optional[int] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    market: Optional[str] = Query(None, description="TOTAL|TOTAL_1_5|TOTAL_3_5|BTTS|DOUBLE_CHANCE; omit for all"),
     sort: str = Query("kickoff_desc", description="kickoff_desc | ev_desc | profit_desc"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -1003,14 +1353,28 @@ async def api_picks_totals(
     response: Response,
     session: AsyncSession = Depends(get_session),
 ):
+    now_utc = utcnow()
+    try:
+        await _refresh_recent_fixture_statuses(session)
+    except Exception:
+        logger.exception("api_picks_totals_recent_refresh_failed")
+    live_lookback_hours = 8
     if date_from is None:
-        date_from = utcnow()
+        date_from = now_utc - timedelta(hours=live_lookback_hours)
     if date_to is None:
-        date_to = utcnow() + timedelta(days=7)
+        date_to = now_utc + timedelta(days=7)
+    stale_ns_hours = int(getattr(settings, "stale_ns_hide_hours", 6) or 0)
 
     sort = (sort or "kickoff_desc").lower()
     if sort not in {"kickoff_desc", "ev_desc", "profit_desc"}:
         raise HTTPException(status_code=400, detail="sort must be one of: kickoff_desc, ev_desc, profit_desc")
+
+    VALID_TOTALS_MARKETS = {'TOTAL', 'TOTAL_1_5', 'TOTAL_3_5', 'BTTS', 'DOUBLE_CHANCE'}
+    if market is not None:
+        market = market.upper()
+        if market not in VALID_TOTALS_MARKETS:
+            raise HTTPException(status_code=400, detail=f"market must be one of: {', '.join(sorted(VALID_TOTALS_MARKETS))}")
+
     order_by = "f.kickoff DESC"
     if sort == "ev_desc":
         order_by = "(pt.confidence * pt.initial_odd - 1) DESC NULLS LAST, f.kickoff DESC"
@@ -1023,20 +1387,39 @@ async def api_picks_totals(
         SELECT COUNT(*) AS cnt
         FROM predictions_totals pt
         JOIN fixtures f ON f.id=pt.fixture_id
-        WHERE pt.market='TOTAL'
+        WHERE (:market IS NULL OR pt.market = :market)
           AND (:league_id IS NULL OR f.league_id=:league_id)
           AND (:date_from IS NULL OR f.kickoff >= :date_from)
           AND (:date_to IS NULL OR f.kickoff <= :date_to)
+          AND COALESCE(f.status, 'UNK') NOT IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO')
+          AND (
+            CAST(:stale_ns_hours AS int) <= 0
+            OR COALESCE(f.status, 'UNK') <> 'NS'
+            OR f.kickoff >= (CAST(:now_utc AS timestamptz) - (CAST(:stale_ns_hours AS int) * interval '1 hour'))
+          )
           AND COALESCE(pt.status, 'PENDING') = 'PENDING'
         """
         ).bindparams(
+            bindparam("market", type_=SAString),
             bindparam("league_id", type_=Integer),
             bindparam("date_from", type_=SADateTime(timezone=True)),
             bindparam("date_to", type_=SADateTime(timezone=True)),
+            bindparam("now_utc", type_=SADateTime(timezone=True)),
+            bindparam("stale_ns_hours", type_=Integer),
         )
     )
     cnt_row = (
-        await session.execute(count_stmt, {"league_id": league_id, "date_from": date_from, "date_to": date_to})
+        await session.execute(
+            count_stmt,
+            {
+                "market": market,
+                "league_id": league_id,
+                "date_from": date_from,
+                "date_to": date_to,
+                "now_utc": now_utc,
+                "stale_ns_hours": stale_ns_hours,
+            },
+        )
     ).first()
     response.headers["X-Total-Count"] = str(int(cnt_row.cnt or 0) if cnt_row else 0)
 
@@ -1046,7 +1429,17 @@ async def api_picks_totals(
         SELECT pt.fixture_id, f.kickoff, th.name as home_name, ta.name as away_name,
                th.logo_url AS home_logo_url, ta.logo_url AS away_logo_url,
                f.league_id, l.name as league, l.logo_url AS league_logo_url,
-               f.status AS fixture_status, f.home_goals, f.away_goals,
+               f.status AS fixture_status,
+               CASE
+                 WHEN COALESCE(f.status, 'UNK') IN ('LIVE', '1H', 'HT', '2H', 'ET', 'BT', 'P', 'INT')
+                   THEN GREATEST(
+                     0,
+                     CAST(EXTRACT(EPOCH FROM (CAST(:now_utc AS timestamptz) - f.kickoff)) / 60 AS int)
+                   )
+                 ELSE NULL
+               END AS fixture_minute,
+               f.home_goals, f.away_goals,
+               pt.market AS market_code,
                pt.selection, pt.initial_odd, pt.confidence, pt.value_index,
                COALESCE(pt.status, 'PENDING') AS status, pt.profit,
                o.market_avg_over_2_5, o.market_avg_under_2_5
@@ -1056,17 +1449,27 @@ async def api_picks_totals(
         JOIN teams ta ON ta.id=f.away_team_id
         LEFT JOIN leagues l ON l.id=f.league_id
         LEFT JOIN odds o ON o.fixture_id = f.id AND o.bookmaker_id=:bid
-        WHERE (:league_id IS NULL OR f.league_id=:league_id)
+        WHERE (:market IS NULL OR pt.market = :market)
+          AND (:league_id IS NULL OR f.league_id=:league_id)
           AND (:date_from IS NULL OR f.kickoff >= :date_from)
           AND (:date_to IS NULL OR f.kickoff <= :date_to)
+          AND COALESCE(f.status, 'UNK') NOT IN ('FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO')
+          AND (
+            CAST(:stale_ns_hours AS int) <= 0
+            OR COALESCE(f.status, 'UNK') <> 'NS'
+            OR f.kickoff >= (CAST(:now_utc AS timestamptz) - (CAST(:stale_ns_hours AS int) * interval '1 hour'))
+          )
           AND COALESCE(pt.status, 'PENDING') = 'PENDING'
         ORDER BY {order_by}
         LIMIT :limit OFFSET :offset
             """
         ).bindparams(
+            bindparam("market", type_=SAString),
             bindparam("league_id", type_=Integer),
             bindparam("date_from", type_=SADateTime(timezone=True)),
             bindparam("date_to", type_=SADateTime(timezone=True)),
+            bindparam("now_utc", type_=SADateTime(timezone=True)),
+            bindparam("stale_ns_hours", type_=Integer),
             bindparam("limit", type_=Integer),
             bindparam("offset", type_=Integer),
             bindparam("bid", type_=Integer),
@@ -1075,9 +1478,12 @@ async def api_picks_totals(
     res = await session.execute(
         stmt,
         {
+            "market": market,
             "league_id": league_id,
             "date_from": date_from,
             "date_to": date_to,
+            "now_utc": now_utc,
+            "stale_ns_hours": stale_ns_hours,
             "limit": limit,
             "offset": offset,
             "bid": settings.bookmaker_id,
@@ -1119,6 +1525,8 @@ async def api_picks_totals(
                 "league": row.league if getattr(row, "league", None) is not None else None,
                 "league_logo_url": row.league_logo_url if getattr(row, "league_logo_url", None) is not None else None,
                 "fixture_status": row.fixture_status,
+                "fixture_minute": int(row.fixture_minute) if getattr(row, "fixture_minute", None) is not None else None,
+                "market": row.market_code,
                 "pick": row.selection,
                 "odd": float(row.initial_odd) if row.initial_odd is not None else None,
                 "confidence": float(row.confidence) if row.confidence is not None else None,
@@ -1205,6 +1613,11 @@ async def api_bets_history(
     response: Response,
     session: AsyncSession = Depends(get_session),
 ):
+    try:
+        await _refresh_recent_fixture_statuses(session)
+    except Exception:
+        logger.exception("api_bets_history_recent_refresh_failed")
+
     if not all_time:
         if date_to is None:
             date_to = utcnow()
@@ -1212,14 +1625,19 @@ async def api_bets_history(
             date_from = date_to - timedelta(days=30)
 
     market = (market or "all").lower()
-    if market not in {"all", "1x2", "totals"}:
-        raise HTTPException(status_code=400, detail="market must be one of: all, 1x2, totals")
+    VALID_HISTORY_MARKETS = {"all", "1x2", "totals", "total_1_5", "total_3_5", "btts", "double_chance"}
+    if market not in VALID_HISTORY_MARKETS:
+        raise HTTPException(status_code=400, detail=f"market must be one of: {', '.join(sorted(VALID_HISTORY_MARKETS))}")
 
     status = status.upper() if status else None
     if status is not None and status not in {"WIN", "LOSS", "PENDING", "VOID"}:
         raise HTTPException(status_code=400, detail="status must be one of: WIN, LOSS, PENDING, VOID")
     if completed_only:
         settled_only = False
+
+    # Keep dashboard/history views fresh: settle finished fixtures immediately,
+    # without waiting for the scheduled evaluate_results cron.
+    await _auto_settle_finished_bets(session)
 
     sort = (sort or "kickoff_desc").lower()
     if sort not in {"kickoff_desc", "ev_desc", "profit_desc", "signal_desc"}:
@@ -1260,7 +1678,7 @@ async def api_bets_history(
         "team_like": team_like,
     }
 
-    if market in {"1x2", "totals"}:
+    if market in {"1x2", "totals", "total_1_5", "total_3_5", "btts", "double_chance"}:
         if market == "1x2":
             order_sql = "f.kickoff DESC"
             if sort == "ev_desc":
@@ -1365,11 +1783,17 @@ async def api_bets_history(
             res = await session.execute(data_stmt, params_common)
         else:
             # predictions_totals does not have signal_score; fall back to kickoff sorting if requested.
+            MARKET_DB_MAP = {'totals': 'TOTAL', 'total_1_5': 'TOTAL_1_5', 'total_3_5': 'TOTAL_3_5', 'btts': 'BTTS', 'double_chance': 'DOUBLE_CHANCE'}
+            market_name = MARKET_DB_MAP.get(market, 'TOTAL')
+
             order_sql = "f.kickoff DESC"
             if sort == "ev_desc":
                 order_sql = "((pt.confidence * pt.initial_odd) - 1) DESC NULLS LAST, f.kickoff DESC"
             elif sort == "profit_desc":
                 order_sql = "pt.profit DESC NULLS LAST, f.kickoff DESC"
+
+            params_count["market_name"] = market_name
+            params_common["market_name"] = market_name
 
             count_stmt = (
                 text(
@@ -1379,7 +1803,7 @@ async def api_bets_history(
                     JOIN fixtures f ON f.id=pt.fixture_id
                     JOIN teams th ON th.id=f.home_team_id
                     JOIN teams ta ON ta.id=f.away_team_id
-                    WHERE pt.market='TOTAL'
+                    WHERE pt.market = :market_name
                       AND (:league_id IS NULL OR f.league_id=:league_id)
                       AND (:date_from IS NULL OR f.kickoff >= :date_from)
                       AND (:date_to IS NULL OR f.kickoff < :date_to)
@@ -1393,6 +1817,7 @@ async def api_bets_history(
                       AND (:team_like IS NULL OR lower(th.name) LIKE :team_like OR lower(ta.name) LIKE :team_like)
                     """
                 ).bindparams(
+                    bindparam("market_name", type_=SAString),
                     bindparam("league_id", type_=Integer),
                     bindparam("date_from", type_=SADateTime(timezone=True)),
                     bindparam("date_to", type_=SADateTime(timezone=True)),
@@ -1409,7 +1834,7 @@ async def api_bets_history(
                 text(
                     f"""
                     SELECT
-                      'TOTAL'::text AS market,
+                      pt.market::text AS market,
                       pt.fixture_id::int AS fixture_id,
                       f.kickoff AS kickoff,
                       l.name AS league,
@@ -1436,7 +1861,7 @@ async def api_bets_history(
                     JOIN teams th ON th.id=f.home_team_id
                     JOIN teams ta ON ta.id=f.away_team_id
                     LEFT JOIN leagues l ON l.id=f.league_id
-                    WHERE pt.market='TOTAL'
+                    WHERE pt.market = :market_name
                       AND (:league_id IS NULL OR f.league_id=:league_id)
                       AND (:date_from IS NULL OR f.kickoff >= :date_from)
                       AND (:date_to IS NULL OR f.kickoff < :date_to)
@@ -1452,6 +1877,7 @@ async def api_bets_history(
                     LIMIT :limit OFFSET :offset
                     """
                 ).bindparams(
+                    bindparam("market_name", type_=SAString),
                     bindparam("league_id", type_=Integer),
                     bindparam("date_from", type_=SADateTime(timezone=True)),
                     bindparam("date_to", type_=SADateTime(timezone=True)),
@@ -1500,7 +1926,7 @@ async def api_bets_history(
           WHERE p.selection_code != 'SKIP'
           UNION ALL
           SELECT
-            'TOTAL'::text AS market,
+            pt.market::text AS market,
             f.league_id AS league_id,
             pt.fixture_id::int AS fixture_id,
             f.kickoff AS kickoff,
@@ -1528,7 +1954,6 @@ async def api_bets_history(
           JOIN teams th ON th.id=f.home_team_id
           JOIN teams ta ON ta.id=f.away_team_id
           LEFT JOIN leagues l ON l.id=f.league_id
-          WHERE pt.market='TOTAL'
         )
         """
 
@@ -2100,6 +2525,7 @@ class PublishRequest(BaseModel):
     fixture_id: int
     force: bool = False
     dry_run: bool = False
+    image_theme: Optional[str] = None
 
 
 @app.get("/api/v1/publish/preview")
@@ -2114,18 +2540,67 @@ async def api_publish_preview(
         raise HTTPException(status_code=404, detail="fixture not found")
 
 
-@app.post("/api/v1/publish")
-async def api_publish(
-    req: PublishRequest,
+@app.get("/api/v1/publish/post_preview")
+async def api_publish_post_preview(
+    fixture_id: int,
+    image_theme: Optional[str] = None,
+    lang: Optional[str] = None,
     _: None = Depends(_require_admin),
     session: AsyncSession = Depends(get_session),
 ):
+    try:
+        return await publishing.build_post_preview(
+            session,
+            fixture_id,
+            image_theme=image_theme,
+            lang=lang,
+        )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="fixture not found")
+
+
+@app.post("/api/v1/publish")
+async def api_publish(
+    request: Request,
+    req: PublishRequest,
+    _: None = Depends(_require_admin),
+    session: AsyncSession = Depends(get_session),
+    x_admin_actor: str | None = Header(default=None, alias="X-Admin-Actor"),
+):
+    actor = (x_admin_actor or "").strip() or "unknown"
+    client_ip = None
+    try:
+        client_ip = request.client.host if request and request.client else None
+    except Exception:
+        pass
+    logger.info(
+        "publish_action fixture=%s dry_run=%s actor=%s ip=%s",
+        req.fixture_id, req.dry_run, actor, client_ip,
+    )
     return await publishing.publish_fixture(
         session,
         req.fixture_id,
         force=bool(req.force),
         dry_run=bool(req.dry_run),
+        image_theme=req.image_theme,
     )
+
+
+def _normalize_publish_payload(payload_raw):
+    if payload_raw is None:
+        return {}
+    if isinstance(payload_raw, dict):
+        return payload_raw
+    if isinstance(payload_raw, str):
+        raw = payload_raw.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 
 @app.get("/api/v1/publish/history")
@@ -2140,7 +2615,7 @@ async def api_publish_history(
         SELECT
           id, fixture_id, market, language, channel_id, status,
           experimental, headline_message_id, analysis_message_id,
-          error, created_at, published_at
+          payload, error, created_at, published_at
         FROM prediction_publications
         WHERE fixture_id=:fid
         ORDER BY created_at DESC
@@ -2153,6 +2628,18 @@ async def api_publish_history(
     res = await session.execute(stmt, {"fid": fixture_id, "limit": limit})
     rows = []
     for r in res.fetchall():
+        payload = _normalize_publish_payload(getattr(r, "payload", None))
+        reason_raw = payload.get("reason")
+        reason = str(reason_raw).strip() if reason_raw is not None else None
+        if reason == "":
+            reason = None
+        reasons_raw = payload.get("reasons")
+        reasons = []
+        if isinstance(reasons_raw, list):
+            for item in reasons_raw:
+                text_item = str(item).strip()
+                if text_item:
+                    reasons.append(text_item)
         rows.append(
             {
                 "id": int(r.id),
@@ -2164,12 +2651,170 @@ async def api_publish_history(
                 "experimental": bool(r.experimental),
                 "headline_message_id": r.headline_message_id,
                 "analysis_message_id": r.analysis_message_id,
+                "reason": reason,
+                "reasons": reasons,
                 "error": r.error,
                 "created_at": r.created_at.isoformat() if r.created_at is not None else None,
                 "published_at": r.published_at.isoformat() if r.published_at is not None else None,
             }
         )
     return rows
+
+
+@app.get("/api/v1/publish/history/global")
+async def api_publish_history_global(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    status: str | None = Query(None),
+    hours: int = Query(48, ge=1, le=720),
+    _: None = Depends(_require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    count_stmt = text(
+        """
+        SELECT count(*) FROM prediction_publications pp
+        WHERE pp.created_at >= now() - make_interval(hours => :hours)
+          AND (:status IS NULL OR pp.status = :status)
+        """
+    ).bindparams(
+        bindparam("hours", type_=Integer),
+        bindparam("status", type_=SAString),
+    )
+    count_res = await session.execute(count_stmt, {"hours": hours, "status": status})
+    total = count_res.scalar() or 0
+
+    stmt = text(
+        """
+        SELECT
+          pp.id, pp.fixture_id, pp.market, pp.language, pp.channel_id,
+          pp.status, pp.error, pp.created_at, pp.published_at,
+          f.kickoff,
+          th.name AS home, ta.name AS away
+        FROM prediction_publications pp
+        LEFT JOIN fixtures f ON f.id = pp.fixture_id
+        LEFT JOIN teams th ON th.id = f.home_team_id
+        LEFT JOIN teams ta ON ta.id = f.away_team_id
+        WHERE pp.created_at >= now() - make_interval(hours => :hours)
+          AND (:status IS NULL OR pp.status = :status)
+        ORDER BY pp.created_at DESC
+        LIMIT :limit OFFSET :offset
+        """
+    ).bindparams(
+        bindparam("hours", type_=Integer),
+        bindparam("status", type_=SAString),
+        bindparam("limit", type_=Integer),
+        bindparam("offset", type_=Integer),
+    )
+    res = await session.execute(stmt, {"hours": hours, "status": status, "limit": limit, "offset": offset})
+    rows = [
+        {
+            "id": int(r.id),
+            "fixture_id": int(r.fixture_id),
+            "home": r.home or "",
+            "away": r.away or "",
+            "kickoff": r.kickoff.isoformat() if r.kickoff else None,
+            "market": r.market,
+            "language": r.language,
+            "channel_id": int(r.channel_id) if r.channel_id else None,
+            "status": r.status,
+            "error": r.error,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "published_at": r.published_at.isoformat() if r.published_at else None,
+        }
+        for r in res.fetchall()
+    ]
+    return JSONResponse(content=rows, headers={"X-Total-Count": str(total)})
+
+
+@app.get("/api/v1/publish/metrics")
+async def api_publish_metrics(
+    hours: int | None = Query(None, ge=1, le=24 * 14),
+    _: None = Depends(_require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    window_hours = int(hours or settings.publish_metrics_window_hours or 24)
+    stmt = text(
+        """
+        SELECT status, payload, created_at
+        FROM prediction_publications
+        WHERE created_at >= (now() - make_interval(hours => :hours))
+        ORDER BY created_at DESC
+        """
+    ).bindparams(bindparam("hours", type_=Integer))
+    res = await session.execute(stmt, {"hours": window_hours})
+    rows = res.fetchall()
+
+    published_statuses = {"ok", "published"}
+    send_failed_statuses = {"failed", "send_failed"}
+
+    status_counts: dict[str, int] = {}
+    html_attempts = 0
+    html_failures = 0
+    html_fallback_to_text = 0
+    telegram_attempts = 0
+    telegram_failures = 0
+    render_times: list[int] = []
+
+    for row in rows:
+        status = str(getattr(row, "status", "") or "").strip().lower()
+        status_counts[status] = status_counts.get(status, 0) + 1
+        payload = _normalize_publish_payload(getattr(row, "payload", None))
+
+        if status in published_statuses or status in send_failed_statuses:
+            telegram_attempts += 1
+            if status in send_failed_statuses:
+                telegram_failures += 1
+
+        html_attempted = bool(payload.get("html_attempted"))
+        html_render_failed = bool(payload.get("html_render_failed"))
+        fallback_reason = str(payload.get("headline_image_fallback") or "").strip()
+        render_time_raw = payload.get("render_time_ms")
+
+        if html_attempted:
+            html_attempts += 1
+            if html_render_failed:
+                html_failures += 1
+            if fallback_reason:
+                html_fallback_to_text += 1
+            try:
+                rt = int(render_time_raw)
+                if rt >= 0:
+                    render_times.append(rt)
+            except Exception:
+                pass
+
+    html_fail_rate = (html_failures / html_attempts) if html_attempts else 0.0
+    telegram_fail_rate = (telegram_failures / telegram_attempts) if telegram_attempts else 0.0
+    fallback_rate = (html_fallback_to_text / html_attempts) if html_attempts else 0.0
+    avg_render_time_ms = (sum(render_times) / len(render_times)) if render_times else 0.0
+    p95_render_time_ms = 0.0
+    if render_times:
+        sorted_times = sorted(render_times)
+        p95_idx = max(0, int(len(sorted_times) * 0.95) - 1)
+        p95_render_time_ms = float(sorted_times[p95_idx])
+
+    threshold_pct = float(settings.publish_html_fallback_alert_pct or Decimal("15"))
+    threshold_ratio = threshold_pct / 100.0
+    alert_triggered = fallback_rate > threshold_ratio
+
+    return {
+        "window_hours": window_hours,
+        "rows_total": int(len(rows)),
+        "status_counts": status_counts,
+        "render_time_ms": {
+            "avg": round(float(avg_render_time_ms), 2),
+            "p95": round(float(p95_render_time_ms), 2),
+            "samples": int(len(render_times)),
+        },
+        "html_fail_rate": round(float(html_fail_rate), 4),
+        "telegram_fail_rate": round(float(telegram_fail_rate), 4),
+        "html_fallback_rate": round(float(fallback_rate), 4),
+        "alert": {
+            "triggered": bool(alert_triggered),
+            "metric": "html_fallback_rate",
+            "threshold_pct": threshold_pct,
+        },
+    }
 
 
 @app.get("/api/v1/stats/totals")
@@ -2206,6 +2851,65 @@ async def api_stats_totals(_: None = Depends(_require_admin), session: AsyncSess
         "roi": roi * 100 if settled else 0.0,
         "total_profit": float(profit),
     }
+
+
+@app.get("/api/v1/market-stats")
+async def api_market_stats(
+    days: int = Query(0, ge=0, le=3650, description="0 = all-time"),
+    _: None = Depends(_require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Per-market performance metrics for all markets (1X2 + totals)."""
+    cutoff = None
+    if days > 0:
+        cutoff = utcnow() - timedelta(days=days)
+    res = await session.execute(
+        text(
+            """
+            WITH combined AS (
+              SELECT '1X2'::text AS market, p.status, p.profit, p.settled_at
+              FROM predictions p
+              WHERE p.selection_code != 'SKIP'
+              UNION ALL
+              SELECT pt.market::text, COALESCE(pt.status,'PENDING'), pt.profit, pt.settled_at
+              FROM predictions_totals pt
+            )
+            SELECT market,
+              COUNT(*) FILTER (WHERE status NOT IN ('VOID','PENDING')) AS total_bets,
+              COUNT(*) FILTER (WHERE status='WIN') AS wins,
+              COUNT(*) FILTER (WHERE status='LOSS') AS losses,
+              COUNT(*) FILTER (WHERE status IN ('VOID','PENDING') OR status IS NULL) AS pending,
+              COALESCE(SUM(profit) FILTER (WHERE status IN ('WIN','LOSS')), 0) AS profit
+            FROM combined
+            WHERE (:cutoff IS NULL OR settled_at >= :cutoff)
+            GROUP BY market
+            ORDER BY market
+            """
+        ).bindparams(bindparam("cutoff", type_=SADateTime(timezone=True))),
+        {"cutoff": cutoff},
+    )
+    markets = {}
+    for row in res.fetchall():
+        mkt = str(row.market or "")
+        total_bets = int(row.total_bets or 0)
+        wins = int(row.wins or 0)
+        losses = int(row.losses or 0)
+        pending = int(row.pending or 0)
+        settled = wins + losses
+        profit = Decimal(row.profit or 0)
+        roi = float(profit / Decimal(settled)) if settled else 0.0
+        win_rate = float(Decimal(wins) / Decimal(settled)) if settled else 0.0
+        markets[mkt] = {
+            "total_bets": total_bets,
+            "wins": wins,
+            "losses": losses,
+            "pending": pending,
+            "settled": settled,
+            "win_rate": round(win_rate * 100, 2) if settled else 0.0,
+            "roi": round(roi * 100, 2) if settled else 0.0,
+            "total_profit": float(profit),
+        }
+    return {"data": markets}
 
 
 @app.get("/api/v1/info/stats")
@@ -2398,7 +3102,7 @@ async def api_dashboard(
               SELECT COALESCE(pt.status, 'PENDING') as status, pt.profit, pt.created_at, f.league_id, 'totals' as bet_type
               FROM predictions_totals pt
               JOIN fixtures f ON f.id = pt.fixture_id
-              WHERE pt.market = 'TOTAL'
+              WHERE pt.selection != 'SKIP'
                 AND COALESCE(pt.status, 'PENDING') IN ('WIN', 'LOSS')
                 AND pt.settled_at >= :cutoff
             )
@@ -2436,7 +3140,7 @@ async def api_dashboard(
               SELECT COALESCE(pt.status, 'PENDING') as status, pt.profit, pt.created_at, f.league_id
               FROM predictions_totals pt
               JOIN fixtures f ON f.id = pt.fixture_id
-              WHERE pt.market = 'TOTAL'
+              WHERE pt.selection != 'SKIP'
                 AND COALESCE(pt.status, 'PENDING') IN ('WIN', 'LOSS')
                 AND pt.settled_at >= :prev_cutoff
                 AND pt.settled_at < :cutoff
@@ -2816,15 +3520,7 @@ async def api_model_status(_: None = Depends(_require_admin), session: AsyncSess
         )
         league_rows = res.fetchall()
 
-    prob_source = (
-        "hybrid"
-        if settings.use_hybrid_probs
-        else "logistic"
-        if settings.use_logistic_probs
-        else "dixon_coles"
-        if settings.use_dixon_coles_probs
-        else "poisson"
-    )
+    prob_source = "stacking"
 
     day_start, reset_at = utc_day_window(now_utc)
     guard = await quota_guard_decision(
@@ -3557,6 +4253,525 @@ async def ui_css():
 async def ui_js():
     path = BASE_DIR / "ui" / "ui.js"
     return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-store"})
+
+
+# ---------- New static file routes ----------
+
+@app.get("/public.css", include_in_schema=False)
+async def public_css():
+    path = BASE_DIR / "public_site" / "public.css"
+    return FileResponse(path, media_type="text/css", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/public.js", include_in_schema=False)
+async def public_js():
+    path = BASE_DIR / "public_site" / "public.js"
+    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/shared/tokens.css", include_in_schema=False)
+async def shared_tokens_css():
+    path = BASE_DIR / "shared" / "tokens.css"
+    return FileResponse(path, media_type="text/css", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/admin", include_in_schema=False)
+async def admin_root():
+    path = BASE_DIR / "admin" / "index.html"
+    return FileResponse(path, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/admin/admin.css", include_in_schema=False)
+async def admin_panel_css():
+    path = BASE_DIR / "admin" / "admin.css"
+    return FileResponse(path, media_type="text/css", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/admin/admin.js", include_in_schema=False)
+async def admin_panel_js():
+    path = BASE_DIR / "admin" / "admin.js"
+    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-store"})
+
+
+# ---------- Public API (no auth) ----------
+
+@app.get("/api/public/v1/leagues")
+async def public_leagues(
+    _rate: None = Depends(_check_public_rate),
+    session: AsyncSession = Depends(get_session),
+):
+    league_ids = settings.league_ids or []
+    if not league_ids:
+        return []
+    placeholders = ", ".join(str(lid) for lid in league_ids)
+    res = await session.execute(
+        text(f"""
+            SELECT DISTINCT l.id, l.name, l.country, l.logo_url
+            FROM leagues l
+            WHERE l.id IN ({placeholders})
+            ORDER BY l.name
+        """)
+    )
+    rows = res.fetchall()
+    if not rows:
+        res2 = await session.execute(
+            text(f"""
+                SELECT DISTINCT f.league_id AS id, l.name, l.country, l.logo_url
+                FROM fixtures f
+                LEFT JOIN leagues l ON l.id = f.league_id
+                WHERE f.league_id IN ({placeholders})
+                GROUP BY f.league_id, l.name, l.country, l.logo_url
+                ORDER BY l.name NULLS LAST
+            """)
+        )
+        rows = res2.fetchall()
+    return [
+        {"id": int(r.id), "name": r.name or f"League {r.id}", "country": r.country or "", "logo_url": r.logo_url or ""}
+        for r in rows
+    ]
+
+
+@app.get("/api/public/v1/stats")
+async def public_stats(
+    days: int = Query(90, ge=1, le=365),
+    _rate: None = Depends(_check_public_rate),
+    session: AsyncSession = Depends(get_session),
+):
+    cutoff = utcnow() - timedelta(days=days)
+    res = await session.execute(
+        text("""
+            WITH combined AS (
+              SELECT p.status, p.profit
+              FROM predictions p
+              WHERE p.selection_code != 'SKIP' AND p.status IN ('WIN','LOSS')
+                AND p.settled_at >= :cutoff
+              UNION ALL
+              SELECT COALESCE(pt.status,'PENDING'), pt.profit
+              FROM predictions_totals pt
+              WHERE COALESCE(pt.status,'PENDING') IN ('WIN','LOSS')
+                AND pt.settled_at >= :cutoff
+            )
+            SELECT
+              COUNT(*) AS total_bets,
+              COUNT(*) FILTER (WHERE status='WIN') AS wins,
+              COUNT(*) FILTER (WHERE status='LOSS') AS losses,
+              COALESCE(SUM(profit),0) AS total_profit
+            FROM combined
+        """).bindparams(bindparam("cutoff", type_=SADateTime(timezone=True))),
+        {"cutoff": cutoff},
+    )
+    row = res.first()
+    total = int(row.total_bets or 0)
+    wins = int(row.wins or 0)
+    losses = int(row.losses or 0)
+    profit = float(row.total_profit or 0)
+    settled = wins + losses
+    return {
+        "period_days": days,
+        "total_bets": total,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round((wins / settled) * 100, 1) if settled else 0.0,
+        "roi": round((profit / settled) * 100, 1) if settled else 0.0,
+        "total_profit": round(profit, 2),
+    }
+
+
+@app.get("/api/public/v1/matches")
+async def public_matches(
+    league_id: Optional[int] = None,
+    days_ahead: int = Query(7, ge=1, le=30),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _rate: None = Depends(_check_public_rate),
+    *,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    now_utc = utcnow()
+    date_from = now_utc - timedelta(hours=8)
+    date_to = now_utc + timedelta(days=days_ahead)
+    stale_ns_hours = int(getattr(settings, "stale_ns_hide_hours", 6) or 0)
+    bid = settings.bookmaker_id
+
+    cnt_res = await session.execute(
+        text("""
+            WITH combined AS (
+              SELECT p.fixture_id FROM predictions p
+              JOIN fixtures f ON f.id = p.fixture_id
+              WHERE p.selection_code != 'SKIP'
+                AND (:league_id IS NULL OR f.league_id = :league_id)
+                AND f.kickoff >= :date_from AND f.kickoff <= :date_to
+                AND COALESCE(f.status,'UNK') NOT IN ('FT','AET','PEN','CANC','ABD','AWD','WO')
+                AND (CAST(:stale_ns_hours AS int) <= 0
+                     OR COALESCE(f.status,'UNK') <> 'NS'
+                     OR f.kickoff >= (CAST(:now_utc AS timestamptz) - (CAST(:stale_ns_hours AS int) * interval '1 hour')))
+                AND COALESCE(p.status,'PENDING') = 'PENDING'
+              UNION ALL
+              SELECT pt.fixture_id FROM predictions_totals pt
+              JOIN fixtures f ON f.id = pt.fixture_id
+              WHERE (:league_id IS NULL OR f.league_id = :league_id)
+                AND f.kickoff >= :date_from AND f.kickoff <= :date_to
+                AND COALESCE(f.status,'UNK') NOT IN ('FT','AET','PEN','CANC','ABD','AWD','WO')
+                AND (CAST(:stale_ns_hours AS int) <= 0
+                     OR COALESCE(f.status,'UNK') <> 'NS'
+                     OR f.kickoff >= (CAST(:now_utc AS timestamptz) - (CAST(:stale_ns_hours AS int) * interval '1 hour')))
+                AND COALESCE(pt.status,'PENDING') = 'PENDING'
+            )
+            SELECT COUNT(*) AS cnt FROM combined
+        """).bindparams(
+            bindparam("league_id", type_=Integer),
+            bindparam("date_from", type_=SADateTime(timezone=True)),
+            bindparam("date_to", type_=SADateTime(timezone=True)),
+            bindparam("now_utc", type_=SADateTime(timezone=True)),
+            bindparam("stale_ns_hours", type_=Integer),
+        ),
+        {"league_id": league_id, "date_from": date_from, "date_to": date_to, "now_utc": now_utc, "stale_ns_hours": stale_ns_hours},
+    )
+    cnt_row = cnt_res.first()
+    response.headers["X-Total-Count"] = str(int(cnt_row.cnt or 0) if cnt_row else 0)
+    response.headers["Cache-Control"] = "public, max-age=120"
+
+    res = await session.execute(
+        text("""
+            WITH combined AS (
+              SELECT '1X2'::text AS market, p.fixture_id, f.kickoff, th.name AS home, ta.name AS away,
+                     th.logo_url AS home_logo_url, ta.logo_url AS away_logo_url,
+                     f.league_id, l.name AS league, l.logo_url AS league_logo_url,
+                     f.status AS fixture_status, f.home_goals, f.away_goals,
+                     p.selection_code AS pick, p.initial_odd, p.confidence
+              FROM predictions p
+              JOIN fixtures f ON f.id = p.fixture_id
+              JOIN teams th ON th.id = f.home_team_id
+              JOIN teams ta ON ta.id = f.away_team_id
+              LEFT JOIN leagues l ON l.id = f.league_id
+              WHERE p.selection_code != 'SKIP'
+                AND (:league_id IS NULL OR f.league_id = :league_id)
+                AND f.kickoff >= :date_from AND f.kickoff <= :date_to
+                AND COALESCE(f.status,'UNK') NOT IN ('FT','AET','PEN','CANC','ABD','AWD','WO')
+                AND (CAST(:stale_ns_hours AS int) <= 0
+                     OR COALESCE(f.status,'UNK') <> 'NS'
+                     OR f.kickoff >= (CAST(:now_utc AS timestamptz) - (CAST(:stale_ns_hours AS int) * interval '1 hour')))
+                AND COALESCE(p.status,'PENDING') = 'PENDING'
+              UNION ALL
+              SELECT pt.market::text AS market, pt.fixture_id, f.kickoff, th.name AS home, ta.name AS away,
+                     th.logo_url AS home_logo_url, ta.logo_url AS away_logo_url,
+                     f.league_id, l.name AS league, l.logo_url AS league_logo_url,
+                     f.status AS fixture_status, f.home_goals, f.away_goals,
+                     pt.selection AS pick, pt.initial_odd, pt.confidence
+              FROM predictions_totals pt
+              JOIN fixtures f ON f.id = pt.fixture_id
+              JOIN teams th ON th.id = f.home_team_id
+              JOIN teams ta ON ta.id = f.away_team_id
+              LEFT JOIN leagues l ON l.id = f.league_id
+              WHERE (:league_id IS NULL OR f.league_id = :league_id)
+                AND f.kickoff >= :date_from AND f.kickoff <= :date_to
+                AND COALESCE(f.status,'UNK') NOT IN ('FT','AET','PEN','CANC','ABD','AWD','WO')
+                AND (CAST(:stale_ns_hours AS int) <= 0
+                     OR COALESCE(f.status,'UNK') <> 'NS'
+                     OR f.kickoff >= (CAST(:now_utc AS timestamptz) - (CAST(:stale_ns_hours AS int) * interval '1 hour')))
+                AND COALESCE(pt.status,'PENDING') = 'PENDING'
+            )
+            SELECT * FROM combined
+            ORDER BY kickoff ASC
+            LIMIT :limit OFFSET :offset
+        """).bindparams(
+            bindparam("league_id", type_=Integer),
+            bindparam("date_from", type_=SADateTime(timezone=True)),
+            bindparam("date_to", type_=SADateTime(timezone=True)),
+            bindparam("now_utc", type_=SADateTime(timezone=True)),
+            bindparam("stale_ns_hours", type_=Integer),
+            bindparam("limit", type_=Integer),
+            bindparam("offset", type_=Integer),
+        ),
+        {"league_id": league_id, "date_from": date_from, "date_to": date_to,
+         "now_utc": now_utc, "stale_ns_hours": stale_ns_hours, "limit": limit, "offset": offset},
+    )
+    out = []
+    for r in res.fetchall():
+        score = f"{r.home_goals}-{r.away_goals}" if r.home_goals is not None and r.away_goals is not None else None
+        ev = None
+        if r.confidence is not None and r.initial_odd is not None:
+            try:
+                ev = round(float(Decimal(str(r.confidence)) * Decimal(str(r.initial_odd)) - 1), 4)
+            except Exception:
+                ev = None
+        out.append({
+            "fixture_id": int(r.fixture_id),
+            "kickoff": r.kickoff.isoformat() if r.kickoff else None,
+            "home": r.home,
+            "away": r.away,
+            "home_logo_url": r.home_logo_url,
+            "away_logo_url": r.away_logo_url,
+            "league_id": int(r.league_id) if r.league_id else None,
+            "league": r.league,
+            "league_logo_url": r.league_logo_url,
+            "fixture_status": r.fixture_status,
+            "score": score,
+            "market": r.market,
+            "pick": r.pick,
+            "odd": float(r.initial_odd) if r.initial_odd else None,
+            "confidence": round(float(r.confidence), 4) if r.confidence is not None else None,
+            "ev": ev,
+        })
+    return out
+
+
+@app.get("/api/public/v1/matches/{fixture_id}")
+async def public_match_detail(
+    fixture_id: int,
+    _rate: None = Depends(_check_public_rate),
+    session: AsyncSession = Depends(get_session),
+):
+    bid = settings.bookmaker_id
+    # Base fixture data
+    fix_res = await session.execute(
+        text("""
+            SELECT f.id, f.kickoff, f.status, f.home_goals, f.away_goals,
+                   th.name AS home, ta.name AS away,
+                   th.logo_url AS home_logo_url, ta.logo_url AS away_logo_url,
+                   f.league_id, l.name AS league, l.logo_url AS league_logo_url,
+                   o.home_win AS odds_home, o.draw AS odds_draw, o.away_win AS odds_away,
+                   o.over_2_5 AS odds_over, o.under_2_5 AS odds_under
+            FROM fixtures f
+            JOIN teams th ON th.id = f.home_team_id
+            JOIN teams ta ON ta.id = f.away_team_id
+            LEFT JOIN leagues l ON l.id = f.league_id
+            LEFT JOIN odds o ON o.fixture_id = f.id AND o.bookmaker_id = :bid
+            WHERE f.id = :fid
+        """).bindparams(
+            bindparam("fid", type_=Integer),
+            bindparam("bid", type_=Integer),
+        ),
+        {"fid": fixture_id, "bid": bid},
+    )
+    r = fix_res.first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Match not found")
+    score = f"{r.home_goals}-{r.away_goals}" if r.home_goals is not None and r.away_goals is not None else None
+
+    # Gather predictions from all markets
+    preds_res = await session.execute(
+        text("""
+            SELECT '1X2'::text AS market, p.selection_code AS pick,
+                   p.initial_odd, p.confidence, p.status, p.profit
+            FROM predictions p WHERE p.fixture_id = :fid AND p.selection_code != 'SKIP'
+            UNION ALL
+            SELECT pt.market, pt.selection AS pick,
+                   pt.initial_odd, pt.confidence, pt.status, pt.profit
+            FROM predictions_totals pt WHERE pt.fixture_id = :fid
+        """).bindparams(bindparam("fid", type_=Integer)),
+        {"fid": fixture_id},
+    )
+    predictions = []
+    first_pred = None
+    for pr in preds_res.fetchall():
+        ev = None
+        if pr.confidence is not None and pr.initial_odd is not None:
+            try:
+                ev = round(float(Decimal(str(pr.confidence)) * Decimal(str(pr.initial_odd)) - 1), 4)
+            except Exception:
+                ev = None
+        pred_obj = {
+            "market": pr.market,
+            "pick": pr.pick,
+            "odd": float(pr.initial_odd) if pr.initial_odd else None,
+            "confidence": round(float(pr.confidence), 4) if pr.confidence is not None else None,
+            "ev": ev,
+            "status": pr.status or "PENDING",
+            "profit": round(float(pr.profit), 2) if pr.profit is not None else None,
+        }
+        predictions.append(pred_obj)
+        if first_pred is None:
+            first_pred = pred_obj
+
+    return {
+        "fixture_id": int(r.id),
+        "kickoff": r.kickoff.isoformat() if r.kickoff else None,
+        "status": r.status,
+        "home": r.home,
+        "away": r.away,
+        "home_logo_url": r.home_logo_url,
+        "away_logo_url": r.away_logo_url,
+        "league_id": int(r.league_id) if r.league_id else None,
+        "league": r.league,
+        "league_logo_url": r.league_logo_url,
+        "score": score,
+        "prediction": first_pred,
+        "predictions": predictions,
+        "odds": {
+            "home_win": float(r.odds_home) if r.odds_home else None,
+            "draw": float(r.odds_draw) if r.odds_draw else None,
+            "away_win": float(r.odds_away) if r.odds_away else None,
+            "over_2_5": float(r.odds_over) if r.odds_over else None,
+            "under_2_5": float(r.odds_under) if r.odds_under else None,
+        } if r.odds_home else None,
+    }
+
+
+@app.get("/api/public/v1/results")
+async def public_results(
+    league_id: Optional[int] = None,
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _rate: None = Depends(_check_public_rate),
+    *,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    cutoff = utcnow() - timedelta(days=days)
+    cnt_res = await session.execute(
+        text("""
+            WITH combined AS (
+              SELECT p.fixture_id FROM predictions p
+              JOIN fixtures f ON f.id = p.fixture_id
+              WHERE p.selection_code != 'SKIP'
+                AND p.status IN ('WIN','LOSS')
+                AND p.settled_at >= :cutoff
+                AND (:league_id IS NULL OR f.league_id = :league_id)
+              UNION ALL
+              SELECT pt.fixture_id FROM predictions_totals pt
+              JOIN fixtures f ON f.id = pt.fixture_id
+              WHERE COALESCE(pt.status,'PENDING') IN ('WIN','LOSS')
+                AND pt.settled_at >= :cutoff
+                AND (:league_id IS NULL OR f.league_id = :league_id)
+            )
+            SELECT COUNT(*) AS cnt FROM combined
+        """).bindparams(
+            bindparam("cutoff", type_=SADateTime(timezone=True)),
+            bindparam("league_id", type_=Integer),
+        ),
+        {"cutoff": cutoff, "league_id": league_id},
+    )
+    cnt_row = cnt_res.first()
+    response.headers["X-Total-Count"] = str(int(cnt_row.cnt or 0) if cnt_row else 0)
+    response.headers["Cache-Control"] = "public, max-age=120"
+
+    res = await session.execute(
+        text("""
+            WITH combined AS (
+              SELECT '1X2'::text AS market, p.fixture_id, f.kickoff, th.name AS home, ta.name AS away,
+                     th.logo_url AS home_logo_url, ta.logo_url AS away_logo_url,
+                     f.league_id, l.name AS league, l.logo_url AS league_logo_url,
+                     f.home_goals, f.away_goals,
+                     p.selection_code AS pick, p.initial_odd, p.confidence,
+                     p.status AS bet_status, p.profit
+              FROM predictions p
+              JOIN fixtures f ON f.id = p.fixture_id
+              JOIN teams th ON th.id = f.home_team_id
+              JOIN teams ta ON ta.id = f.away_team_id
+              LEFT JOIN leagues l ON l.id = f.league_id
+              WHERE p.selection_code != 'SKIP'
+                AND p.status IN ('WIN','LOSS')
+                AND p.settled_at >= :cutoff
+                AND (:league_id IS NULL OR f.league_id = :league_id)
+              UNION ALL
+              SELECT pt.market::text AS market, pt.fixture_id, f.kickoff, th.name AS home, ta.name AS away,
+                     th.logo_url AS home_logo_url, ta.logo_url AS away_logo_url,
+                     f.league_id, l.name AS league, l.logo_url AS league_logo_url,
+                     f.home_goals, f.away_goals,
+                     pt.selection AS pick, pt.initial_odd, pt.confidence,
+                     COALESCE(pt.status,'PENDING') AS bet_status, pt.profit
+              FROM predictions_totals pt
+              JOIN fixtures f ON f.id = pt.fixture_id
+              JOIN teams th ON th.id = f.home_team_id
+              JOIN teams ta ON ta.id = f.away_team_id
+              LEFT JOIN leagues l ON l.id = f.league_id
+              WHERE COALESCE(pt.status,'PENDING') IN ('WIN','LOSS')
+                AND pt.settled_at >= :cutoff
+                AND (:league_id IS NULL OR f.league_id = :league_id)
+            )
+            SELECT * FROM combined
+            ORDER BY kickoff DESC
+            LIMIT :limit OFFSET :offset
+        """).bindparams(
+            bindparam("cutoff", type_=SADateTime(timezone=True)),
+            bindparam("league_id", type_=Integer),
+            bindparam("limit", type_=Integer),
+            bindparam("offset", type_=Integer),
+        ),
+        {"cutoff": cutoff, "league_id": league_id, "limit": limit, "offset": offset},
+    )
+    out = []
+    for r in res.fetchall():
+        score = f"{r.home_goals}-{r.away_goals}" if r.home_goals is not None and r.away_goals is not None else None
+        ev = None
+        if r.confidence is not None and r.initial_odd is not None:
+            try:
+                ev = round(float(Decimal(str(r.confidence)) * Decimal(str(r.initial_odd)) - 1), 4)
+            except Exception:
+                ev = None
+        out.append({
+            "fixture_id": int(r.fixture_id),
+            "kickoff": r.kickoff.isoformat() if r.kickoff else None,
+            "home": r.home,
+            "away": r.away,
+            "home_logo_url": r.home_logo_url,
+            "away_logo_url": r.away_logo_url,
+            "league_id": int(r.league_id) if r.league_id else None,
+            "league": r.league,
+            "league_logo_url": r.league_logo_url,
+            "score": score,
+            "market": r.market,
+            "pick": r.pick,
+            "odd": float(r.initial_odd) if r.initial_odd else None,
+            "ev": ev,
+            "status": r.bet_status,
+            "profit": round(float(r.profit), 2) if r.profit is not None else None,
+        })
+    return out
+
+
+@app.get("/api/public/v1/standings")
+async def public_standings(
+    league_id: int = Query(...),
+    season: Optional[int] = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _rate: None = Depends(_check_public_rate),
+    *,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    season_val = int(season or settings.season)
+    cnt_row = (await session.execute(
+        text("SELECT COUNT(*) AS cnt FROM team_standings WHERE season=:s AND league_id=:lid").bindparams(
+            bindparam("s", type_=Integer), bindparam("lid", type_=Integer)),
+        {"s": season_val, "lid": league_id},
+    )).first()
+    response.headers["X-Total-Count"] = str(int(cnt_row.cnt or 0) if cnt_row else 0)
+    response.headers["Cache-Control"] = "public, max-age=300"
+
+    res = await session.execute(
+        text("""
+            SELECT ts.team_id, t.name AS team_name, t.logo_url AS team_logo_url,
+                   ts.rank, ts.points, ts.played, ts.goals_for, ts.goals_against,
+                   ts.goal_diff, ts.form
+            FROM team_standings ts
+            JOIN teams t ON t.id = ts.team_id
+            WHERE ts.season = :s AND ts.league_id = :lid
+            ORDER BY ts.rank ASC NULLS LAST, ts.points DESC NULLS LAST
+            LIMIT :limit OFFSET :offset
+        """).bindparams(
+            bindparam("s", type_=Integer), bindparam("lid", type_=Integer),
+            bindparam("limit", type_=Integer), bindparam("offset", type_=Integer),
+        ),
+        {"s": season_val, "lid": league_id, "limit": limit, "offset": offset},
+    )
+    return [
+        {
+            "team_id": int(r.team_id), "team_name": r.team_name, "team_logo_url": getattr(r, 'team_logo_url', None),
+            "rank": int(r.rank) if r.rank is not None else None,
+            "points": int(r.points) if r.points is not None else None,
+            "played": int(r.played) if r.played is not None else None,
+            "goals_for": int(r.goals_for) if r.goals_for is not None else None,
+            "goals_against": int(r.goals_against) if r.goals_against is not None else None,
+            "goal_diff": int(r.goal_diff) if r.goal_diff is not None else None,
+            "form": r.form,
+        }
+        for r in res.fetchall()
+    ]
 
 
 @app.get("/api/v1/league_baselines")

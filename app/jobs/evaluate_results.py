@@ -16,21 +16,11 @@ from app.core.config import settings
 from app.core.logger import get_logger
 from app.core.timeutils import ensure_aware_utc
 from app.services.elo_ratings import apply_elo_from_fixtures
+from app.services.metrics import brier_score, log_loss_score, ranked_probability_score
 
 log = get_logger("jobs.evaluate_results")
 FINAL_STATUSES = ("FT", "AET", "PEN")
 CANCEL_STATUSES = ("CANC", "ABD", "AWD", "WO")
-
-
-def brier_score(prob: Decimal, outcome: int) -> Decimal:
-    return (prob - Decimal(outcome)) ** 2
-
-
-def log_loss(prob: Decimal, outcome: int, eps=1e-15) -> Decimal:
-    p = prob
-    eps_dec = Decimal(str(eps))
-    p = max(min(p, Decimal(1) - eps_dec), eps_dec)
-    return -Decimal(outcome) * p.ln() - Decimal(1 - outcome) * (Decimal(1) - p).ln()
 
 
 async def _pending_predictions(session: AsyncSession):
@@ -75,10 +65,22 @@ def _resolve_totals(selection: str, home_goals: int, away_goals: int) -> str:
     if home_goals is None or away_goals is None:
         return "VOID"
     total = home_goals + away_goals
-    if selection == "OVER_2_5":
-        return "WIN" if total >= 3 else "LOSS"
-    if selection == "UNDER_2_5":
-        return "WIN" if total <= 2 else "LOSS"
+    both_scored = home_goals > 0 and away_goals > 0
+    rules = {
+        "OVER_2_5": total >= 3,
+        "UNDER_2_5": total <= 2,
+        "OVER_1_5": total >= 2,
+        "UNDER_1_5": total <= 1,
+        "OVER_3_5": total >= 4,
+        "UNDER_3_5": total <= 3,
+        "BTTS_YES": both_scored,
+        "BTTS_NO": not both_scored,
+        "DC_1X": home_goals >= away_goals,
+        "DC_X2": away_goals >= home_goals,
+        "DC_12": home_goals != away_goals,
+    }
+    if selection in rules:
+        return "WIN" if rules[selection] else "LOSS"
     return "VOID"
 
 
@@ -86,7 +88,7 @@ async def _pending_totals(session: AsyncSession):
     res = await session.execute(
         text(
             """
-            SELECT pt.fixture_id, pt.selection, pt.initial_odd, pt.confidence,
+            SELECT pt.fixture_id, pt.market, pt.selection, pt.initial_odd, pt.confidence,
                    f.home_goals, f.away_goals, f.kickoff
             FROM predictions_totals pt
             JOIN fixtures f ON f.id=pt.fixture_id
@@ -143,7 +145,6 @@ async def _void_cancelled_totals(session: AsyncSession, *, day_start: datetime |
             SET status='VOID', profit=0, settled_at=now()
             FROM fixtures f
             WHERE f.id = pt.fixture_id
-              AND pt.market = 'TOTAL'
               AND COALESCE(pt.status, 'PENDING') = 'PENDING'
               AND f.status IN ('CANC', 'ABD', 'AWD', 'WO')
               AND (:day_start IS NULL OR f.kickoff >= :day_start)
@@ -177,16 +178,17 @@ async def _settle_totals(session: AsyncSession):
     updated = 0
     for row in rows:
         settlement = _resolve_totals(row.selection, row.home_goals, row.away_goals)
+        market = getattr(row, "market", "TOTAL")
         if settlement == "VOID" or row.initial_odd is None:
             await session.execute(
                 text(
                     """
                     UPDATE predictions_totals
                     SET status='VOID', settled_at=now()
-                    WHERE fixture_id=:fid AND market='TOTAL'
+                    WHERE fixture_id=:fid AND market=:mkt
                     """
                 ),
-                {"fid": row.fixture_id},
+                {"fid": row.fixture_id, "mkt": market},
             )
             continue
         profit = _profit(settlement, D(row.initial_odd))
@@ -195,10 +197,10 @@ async def _settle_totals(session: AsyncSession):
                 """
                 UPDATE predictions_totals
                 SET status=:status, profit=:profit, settled_at=now()
-                WHERE fixture_id=:fid AND market='TOTAL'
+                WHERE fixture_id=:fid AND market=:mkt
                 """
             ),
-            {"status": settlement, "profit": profit, "fid": row.fixture_id},
+            {"status": settlement, "profit": profit, "fid": row.fixture_id, "mkt": market},
         )
         updated += 1
     return updated
@@ -321,7 +323,7 @@ async def run(session: AsyncSession):
 
     updated = 0
     voided = 0
-    metrics = defaultdict(lambda: {"brier": Decimal(0), "logloss": Decimal(0), "n": 0})
+    metrics = defaultdict(lambda: {"brier": Decimal(0), "logloss": Decimal(0), "rps": Decimal(0), "n": 0})
 
     if rows:
         for row in rows:
@@ -359,8 +361,26 @@ async def run(session: AsyncSession):
                 flags = row.feature_flags if isinstance(row.feature_flags, dict) else {}
                 source = flags.get("prob_source", "unknown")
                 metrics[source]["brier"] += brier_score(prob, outcome)
-                metrics[source]["logloss"] += log_loss(prob, outcome)
+                metrics[source]["logloss"] += log_loss_score(prob, outcome)
                 metrics[source]["n"] += 1
+                # RPS: need full 1X2 probability distribution
+                p_home = D(flags.get("p_home") or 0)
+                p_draw = D(flags.get("p_draw") or 0)
+                p_away = D(flags.get("p_away") or 0)
+                p_sum = p_home + p_draw + p_away
+                if p_sum > 0:
+                    hg = row.home_goals
+                    ag = row.away_goals
+                    if hg is not None and ag is not None:
+                        if hg > ag:
+                            oi = 0
+                        elif hg == ag:
+                            oi = 1
+                        else:
+                            oi = 2
+                        metrics[source]["rps"] += ranked_probability_score(
+                            (p_home, p_draw, p_away), oi
+                        )
 
         await session.commit()
     # Update Elo for all finished fixtures (not only those with bets) in chronological order.
@@ -383,14 +403,16 @@ async def run(session: AsyncSession):
         n = vals["n"]
         if not n:
             continue
-        brier = (vals["brier"] / D(n)).quantize(Decimal("0.001"))
-        ll = (vals["logloss"] / D(n)).quantize(Decimal("0.001"))
-        log.info("metrics prob_source=%s brier=%s logloss=%s n=%s", src, brier, ll, n)
+        brier_avg = (vals["brier"] / D(n)).quantize(Decimal("0.001"))
+        ll_avg = (vals["logloss"] / D(n)).quantize(Decimal("0.001"))
+        rps_avg = (vals["rps"] / D(n)).quantize(Decimal("0.001"))
+        log.info("metrics prob_source=%s brier=%s logloss=%s rps=%s n=%s", src, brier_avg, ll_avg, rps_avg, n)
     # optional persist
     out = {
         src: {
             "brier": float((vals["brier"] / D(vals["n"])) if vals["n"] else 0),
             "logloss": float((vals["logloss"] / D(vals["n"])) if vals["n"] else 0),
+            "rps": float((vals["rps"] / D(vals["n"])) if vals["n"] else 0),
             "n": vals["n"],
         }
         for src, vals in metrics.items()

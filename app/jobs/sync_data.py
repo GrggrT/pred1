@@ -28,7 +28,7 @@ from app.data.providers.api_football import (
     reset_api_metrics,
     get_api_metrics,
 )
-from app.services.league_model_params import estimate_dixon_coles_rho, estimate_power_calibration_alpha
+from app.services.league_model_params import estimate_dixon_coles_rho
 from app.services.api_football_quota import is_api_football_quota_error, quota_guard_decision
 
 log = get_logger("jobs.sync_data")
@@ -201,6 +201,81 @@ def _extract_total_25(bookmaker: dict) -> Tuple[Optional[float], Optional[float]
     return best_over, best_under
 
 
+def _extract_total_line(bookmaker: dict, line: str) -> Tuple[Optional[float], Optional[float]]:
+    """Extract Over/Under for any goal line (e.g. '1.5', '3.5') from bet id=5."""
+    def _label_matches(label: str, prefix: str) -> bool:
+        return label.startswith(prefix) or label.startswith(prefix.replace(".", ","))
+
+    best_over = best_under = None
+    best_rank = 99
+    for bet in bookmaker.get("bets", []):
+        name = (bet.get("name") or "").lower()
+        bet_id = bet.get("id")
+        if bet_id == 5 or name == "goals over/under":
+            rank = 0
+        elif "over/under" in name and not any(kw in name for kw in ("first half", "1st half", "second half", "2nd half")):
+            rank = 1
+        else:
+            continue
+        over = under = None
+        for val in bet.get("values", []):
+            label = (val.get("value") or "").lower()
+            odd_raw = val.get("odd")
+            odd = float(odd_raw) if odd_raw is not None else None
+            if _label_matches(label, f"over {line}") or _label_matches(label, f"o {line}"):
+                over = odd
+            elif _label_matches(label, f"under {line}") or _label_matches(label, f"u {line}"):
+                under = odd
+        if over is None and under is None:
+            continue
+        if rank < best_rank:
+            best_over, best_under = over, under
+            best_rank = rank
+            if rank == 0:
+                break
+    return best_over, best_under
+
+
+def _extract_btts(bookmaker: dict) -> Tuple[Optional[float], Optional[float]]:
+    """Extract BTTS Yes/No from bet id=8 or name 'both teams score'."""
+    for bet in bookmaker.get("bets", []):
+        name = (bet.get("name") or "").lower()
+        bet_id = bet.get("id")
+        if bet_id == 8 or "both teams score" in name:
+            yes_odd = no_odd = None
+            for val in bet.get("values", []):
+                label = (val.get("value") or "").lower()
+                odd_raw = val.get("odd")
+                odd = float(odd_raw) if odd_raw is not None else None
+                if label == "yes":
+                    yes_odd = odd
+                elif label == "no":
+                    no_odd = odd
+            return yes_odd, no_odd
+    return None, None
+
+
+def _extract_double_chance(bookmaker: dict) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """Extract Double Chance from bet id=12 or name 'double chance'."""
+    for bet in bookmaker.get("bets", []):
+        name = (bet.get("name") or "").lower()
+        bet_id = bet.get("id")
+        if bet_id == 12 or name == "double chance":
+            dc_1x = dc_x2 = dc_12 = None
+            for val in bet.get("values", []):
+                label = (val.get("value") or "").lower()
+                odd_raw = val.get("odd")
+                odd = float(odd_raw) if odd_raw is not None else None
+                if label in {"home/draw", "1x"}:
+                    dc_1x = odd
+                elif label in {"draw/away", "x2"}:
+                    dc_x2 = odd
+                elif label in {"home/away", "12"}:
+                    dc_12 = odd
+            return dc_1x, dc_x2, dc_12
+    return None, None, None
+
+
 async def _upsert_odds(
     session: AsyncSession,
     data: dict,
@@ -219,17 +294,34 @@ async def _upsert_odds(
 
         bet365_home = bet365_draw = bet365_away = None
         bet365_over = bet365_under = None
+        bet365_over_1_5 = bet365_under_1_5 = None
+        bet365_over_3_5 = bet365_under_3_5 = None
+        bet365_btts_yes = bet365_btts_no = None
+        bet365_dc_1x = bet365_dc_x2 = bet365_dc_12 = None
         home_list: list[float] = []
         draw_list: list[float] = []
         away_list: list[float] = []
         over_list: list[float] = []
         under_list: list[float] = []
+        over_1_5_list: list[float] = []
+        under_1_5_list: list[float] = []
+        over_3_5_list: list[float] = []
+        under_3_5_list: list[float] = []
+        btts_yes_list: list[float] = []
+        btts_no_list: list[float] = []
+        dc_1x_list: list[float] = []
+        dc_x2_list: list[float] = []
+        dc_12_list: list[float] = []
 
         for bookmaker in entry.get("bookmakers", []):
             if bookmaker.get("id") != settings.bookmaker_id:
                 pass
             home, draw, away = _extract_1x2(bookmaker)
             over_25, under_25 = _extract_total_25(bookmaker)
+            o15, u15 = _extract_total_line(bookmaker, "1.5")
+            o35, u35 = _extract_total_line(bookmaker, "3.5")
+            btts_y, btts_n = _extract_btts(bookmaker)
+            dc1x, dcx2, dc12 = _extract_double_chance(bookmaker)
             if home is not None:
                 home_list.append(home)
             if draw is not None:
@@ -240,9 +332,31 @@ async def _upsert_odds(
                 over_list.append(over_25)
             if under_25 is not None:
                 under_list.append(under_25)
+            if o15 is not None:
+                over_1_5_list.append(o15)
+            if u15 is not None:
+                under_1_5_list.append(u15)
+            if o35 is not None:
+                over_3_5_list.append(o35)
+            if u35 is not None:
+                under_3_5_list.append(u35)
+            if btts_y is not None:
+                btts_yes_list.append(btts_y)
+            if btts_n is not None:
+                btts_no_list.append(btts_n)
+            if dc1x is not None:
+                dc_1x_list.append(dc1x)
+            if dcx2 is not None:
+                dc_x2_list.append(dcx2)
+            if dc12 is not None:
+                dc_12_list.append(dc12)
             if bookmaker.get("id") == settings.bookmaker_id:
                 bet365_home, bet365_draw, bet365_away = home, draw, away
                 bet365_over, bet365_under = over_25, under_25
+                bet365_over_1_5, bet365_under_1_5 = o15, u15
+                bet365_over_3_5, bet365_under_3_5 = o35, u35
+                bet365_btts_yes, bet365_btts_no = btts_y, btts_n
+                bet365_dc_1x, bet365_dc_x2, bet365_dc_12 = dc1x, dcx2, dc12
 
         if not any([bet365_home, bet365_draw, bet365_away, bet365_over, bet365_under]):
             # no odds from target bookmaker; skip
@@ -256,75 +370,94 @@ async def _upsert_odds(
         market_away = avg(away_list)
         market_over = avg(over_list)
         market_under = avg(under_list)
+        market_over_1_5 = avg(over_1_5_list)
+        market_under_1_5 = avg(under_1_5_list)
+        market_over_3_5 = avg(over_3_5_list)
+        market_under_3_5 = avg(under_3_5_list)
+        market_btts_yes = avg(btts_yes_list)
+        market_btts_no = avg(btts_no_list)
+        market_dc_1x = avg(dc_1x_list)
+        market_dc_x2 = avg(dc_x2_list)
+        market_dc_12 = avg(dc_12_list)
+
+        def _qm(v):
+            return q_money(v) if v is not None else None
+
+        odds_params = {
+            "fid": fixture_id,
+            "bid": settings.bookmaker_id,
+            "h": _qm(bet365_home), "d": _qm(bet365_draw), "a": _qm(bet365_away),
+            "ov": _qm(bet365_over), "un": _qm(bet365_under),
+            "o15": _qm(bet365_over_1_5), "u15": _qm(bet365_under_1_5),
+            "o35": _qm(bet365_over_3_5), "u35": _qm(bet365_under_3_5),
+            "by": _qm(bet365_btts_yes), "bn": _qm(bet365_btts_no),
+            "dc1x": _qm(bet365_dc_1x), "dcx2": _qm(bet365_dc_x2), "dc12": _qm(bet365_dc_12),
+            "mah": _qm(market_home), "mad": _qm(market_draw), "maa": _qm(market_away),
+            "mover": _qm(market_over), "munder": _qm(market_under),
+            "fetched_at": fetched_at,
+        }
 
         await session.execute(
             text(
                 """
                 INSERT INTO odds(fixture_id, bookmaker_id, home_win, draw, away_win, over_2_5, under_2_5,
+                                 over_1_5, under_1_5, over_3_5, under_3_5,
+                                 btts_yes, btts_no,
+                                 dc_1x, dc_x2, dc_12,
                                  market_avg_home_win, market_avg_draw, market_avg_away_win,
-                                 market_avg_over_2_5, market_avg_under_2_5, fetched_at)
-                VALUES(:fid, :bid, :h, :d, :a, :ov, :un, :mah, :mad, :maa, :mover, :munder, :fetched_at)
+                                 market_avg_over_2_5, market_avg_under_2_5,
+                                 fetched_at)
+                VALUES(:fid, :bid, :h, :d, :a, :ov, :un,
+                       :o15, :u15, :o35, :u35,
+                       :by, :bn,
+                       :dc1x, :dcx2, :dc12,
+                       :mah, :mad, :maa, :mover, :munder,
+                       :fetched_at)
                 ON CONFLICT (fixture_id, bookmaker_id) DO UPDATE SET
                   home_win=:h, draw=:d, away_win=:a,
                   over_2_5=:ov, under_2_5=:un,
+                  over_1_5=:o15, under_1_5=:u15,
+                  over_3_5=:o35, under_3_5=:u35,
+                  btts_yes=:by, btts_no=:bn,
+                  dc_1x=:dc1x, dc_x2=:dcx2, dc_12=:dc12,
                   market_avg_home_win=:mah, market_avg_draw=:mad, market_avg_away_win=:maa,
                   market_avg_over_2_5=:mover, market_avg_under_2_5=:munder,
                   fetched_at=:fetched_at
             """
             ),
-            {
-                "fid": fixture_id,
-                "bid": settings.bookmaker_id,
-                "h": q_money(bet365_home) if bet365_home is not None else None,
-                "d": q_money(bet365_draw) if bet365_draw is not None else None,
-                "a": q_money(bet365_away) if bet365_away is not None else None,
-                "ov": q_money(bet365_over) if bet365_over is not None else None,
-                "un": q_money(bet365_under) if bet365_under is not None else None,
-                "mah": q_money(market_home) if market_home is not None else None,
-                "mad": q_money(market_draw) if market_draw is not None else None,
-                "maa": q_money(market_away) if market_away is not None else None,
-                "mover": q_money(market_over) if market_over is not None else None,
-                "munder": q_money(market_under) if market_under is not None else None,
-                "fetched_at": fetched_at,
-            },
+            odds_params,
         )
         # Keep a historical record for true-backtest / analysis.
         # Important: do NOT write snapshots in backtest_mode, otherwise we create "fake" historical odds
         # with simulated timestamps (BACKTEST_CURRENT_DATE affects utcnow()).
         if not settings.backtest_mode:
+            snap_params = dict(odds_params)
+            snap_params.pop("fetched_at", None)
+            snap_params["fetched_at"] = fetched_at
             res_snap = await session.execute(
                 text(
                     """
                     INSERT INTO odds_snapshots(
                       fixture_id, bookmaker_id, fetched_at,
                       home_win, draw, away_win, over_2_5, under_2_5,
+                      over_1_5, under_1_5, over_3_5, under_3_5,
+                      btts_yes, btts_no,
+                      dc_1x, dc_x2, dc_12,
                       market_avg_home_win, market_avg_draw, market_avg_away_win,
                       market_avg_over_2_5, market_avg_under_2_5
                     )
                     VALUES(
                       :fid, :bid, :fetched_at,
                       :h, :d, :a, :ov, :un,
-                      :mah, :mad, :maa,
-                      :mover, :munder
+                      :o15, :u15, :o35, :u35,
+                      :by, :bn,
+                      :dc1x, :dcx2, :dc12,
+                      :mah, :mad, :maa, :mover, :munder
                     )
                     ON CONFLICT DO NOTHING
                     """
                 ),
-                {
-                    "fid": fixture_id,
-                    "bid": settings.bookmaker_id,
-                    "fetched_at": fetched_at,
-                    "h": q_money(bet365_home) if bet365_home is not None else None,
-                    "d": q_money(bet365_draw) if bet365_draw is not None else None,
-                    "a": q_money(bet365_away) if bet365_away is not None else None,
-                    "ov": q_money(bet365_over) if bet365_over is not None else None,
-                    "un": q_money(bet365_under) if bet365_under is not None else None,
-                    "mah": q_money(market_home) if market_home is not None else None,
-                    "mad": q_money(market_draw) if market_draw is not None else None,
-                    "maa": q_money(market_away) if market_away is not None else None,
-                    "mover": q_money(market_over) if market_over is not None else None,
-                    "munder": q_money(market_under) if market_under is not None else None,
-                },
+                snap_params,
             )
             try:
                 snapshots_saved += int(res_snap.rowcount or 0)
@@ -690,27 +823,8 @@ async def _compute_league_baselines(session: AsyncSession, league_id: int, seaso
         lam_home=base_home,
         lam_away=base_away,
     )
-    prob_source = (
-        "hybrid"
-        if settings.use_hybrid_probs
-        else "logistic"
-        if settings.use_logistic_probs
-        else "dixon_coles"
-        if settings.use_dixon_coles_probs
-        else "poisson"
-    )
-    alpha = await estimate_power_calibration_alpha(
-        session,
-        league_id=league_id,
-        season=season,
-        before_date=date_key,
-        prob_source=prob_source,
-    )
     rho_val = rho if rho is not None else q_prob(D(0))
-    alpha_val = alpha if alpha is not None else q_prob(D(1))
-    override = settings.calib_alpha_overrides.get(int(league_id))
-    if override is not None:
-        alpha_val = override
+    alpha_val = q_prob(D(1))
 
     await session.execute(
         text(
@@ -993,6 +1107,59 @@ async def _fixtures_with_pre_kickoff_odds(session: AsyncSession, fixture_ids: li
     return {row.fixture_id for row in res.fetchall()}
 
 
+def _season_candidates_for_now(now_utc: datetime) -> list[int]:
+    out: list[int] = []
+    raw = [int(getattr(settings, "season", 0) or 0), now_utc.year - 1, now_utc.year, now_utc.year + 1]
+    for item in raw:
+        try:
+            v = int(item)
+        except Exception:
+            continue
+        if v < 2000:
+            continue
+        if v not in out:
+            out.append(v)
+    return out
+
+
+async def _get_fixtures_with_season_fallback(
+    session: AsyncSession,
+    league_id: int,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    now_utc: datetime,
+) -> tuple[dict, int, bool]:
+    seasons = _season_candidates_for_now(now_utc)
+    if not seasons:
+        seasons = [int(getattr(settings, "season", now_utc.year) or now_utc.year)]
+
+    first_season = int(seasons[0])
+    selected_season = first_season
+    used_fallback = False
+    data: dict = {"response": []}
+
+    for idx, season in enumerate(seasons):
+        probe = await get_fixtures(session, league_id, int(season), window_start, window_end)
+        if probe.get("response"):
+            data = probe
+            selected_season = int(season)
+            used_fallback = selected_season != first_season
+            break
+        if idx == 0:
+            data = probe
+        await _rate_limit()
+
+    if used_fallback:
+        log.warning(
+            "sync_data season fallback league=%s configured_season=%s used_season=%s",
+            league_id,
+            first_season,
+            selected_season,
+        )
+    return data, selected_season, used_fallback
+
+
 async def run(session: AsyncSession, force_refresh: bool = False):
     if (settings.api_football_key or "").strip() in {"", "YOUR_KEY", "your_paid_key"}:
         raise RuntimeError("API_FOOTBALL_KEY is not configured; cannot run sync_data")
@@ -1048,8 +1215,19 @@ async def run(session: AsyncSession, force_refresh: bool = False):
         stats_updated = stats_missing = 0
         standings_upserted = 0
         quota_blocked_until = None
+        season_usage: dict[int, int] = {}
+        fallback_used_count = 0
         for lid in settings.league_ids:
-            data = await get_fixtures(session, lid, settings.season, window_start, window_end)
+            data, used_season, used_fallback = await _get_fixtures_with_season_fallback(
+                session,
+                lid,
+                window_start=window_start,
+                window_end=window_end,
+                now_utc=now_utc,
+            )
+            season_usage[int(lid)] = int(used_season)
+            if used_fallback:
+                fallback_used_count += 1
             for item in data.get("response", []):
                 await _upsert_fixture(session, item)
                 fixtures_upserted += 1
@@ -1173,13 +1351,15 @@ async def run(session: AsyncSession, force_refresh: bool = False):
     else:
         await session.commit()
         log.info(
-            "sync_data done fixtures=%s odds_fixtures=%s odds_snapshots_saved=%s stats_updated=%s stats_missing=%s standings=%s",
+            "sync_data done fixtures=%s odds_fixtures=%s odds_snapshots_saved=%s stats_updated=%s stats_missing=%s standings=%s fallback_leagues=%s season_usage=%s",
             fixtures_upserted,
             len(fixtures_with_odds),
             snapshots_saved,
             stats_updated,
             stats_missing,
             standings_upserted,
+            fallback_used_count,
+            season_usage,
         )
         api_metrics = get_api_metrics()
         return {

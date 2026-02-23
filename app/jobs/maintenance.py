@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.decimalutils import D, q_money, q_prob
 from app.core.logger import get_logger
 from app.core.timeutils import utcnow
-from app.services.league_model_params import estimate_dixon_coles_rho, estimate_power_calibration_alpha
+from app.services.league_model_params import estimate_dixon_coles_rho
 
 log = get_logger("jobs.maintenance")
 
@@ -99,15 +99,7 @@ async def _refresh_league_model_params(session: AsyncSession) -> dict:
     if not season:
         return {"league_baselines_refreshed": 0}
 
-    prob_source = (
-        "hybrid"
-        if settings.use_hybrid_probs
-        else "logistic"
-        if settings.use_logistic_probs
-        else "dixon_coles"
-        if settings.use_dixon_coles_probs
-        else "poisson"
-    )
+    prob_source = "stacking"
 
     refreshed = 0
     for lid in settings.league_ids:
@@ -165,16 +157,7 @@ async def _refresh_league_model_params(session: AsyncSession) -> dict:
             lam_home=base_home,
             lam_away=base_away,
         )
-        alpha = await estimate_power_calibration_alpha(
-            session,
-            league_id=int(lid),
-            season=season,
-            before_date=today,
-            prob_source=prob_source,
-        )
-        override = settings.calib_alpha_overrides.get(int(lid))
-        if override is not None:
-            alpha = override
+        alpha = q_prob(D(1))
         await session.execute(
             text(
                 """

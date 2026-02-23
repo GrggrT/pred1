@@ -10,13 +10,19 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   app:
     build: .
     restart: unless-stopped
     env_file: .env
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
     environment:
@@ -26,17 +32,30 @@ services:
       uvicorn app.main:app
       --host 0.0.0.0
       --port 8000
-  
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
   scheduler:
     build: .
     restart: unless-stopped
     env_file: .env
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       SCHEDULER_ENABLED: "true"
     command: >
       python -m app.scheduler_runner
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import app; print(\"ok\")'"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 volumes:
   pgdata:

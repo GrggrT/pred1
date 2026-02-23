@@ -1,3 +1,5 @@
+# Exact versions are pinned in requirements.lock
+# For reproducible builds: pip install -r requirements.lock
 fastapi==0.115.4
 uvicorn[standard]==0.32.0
 httpx==0.27.2
@@ -5,10 +7,14 @@ pydantic==2.9.2
 pydantic-settings==2.6.1
 SQLAlchemy==2.0.36
 asyncpg==0.30.0
+psycopg2-binary>=2.9.9
 alembic==1.13.3
 APScheduler==3.10.4
 python-dateutil==2.9.0.post0
 numpy==2.1.3
+scipy>=1.12.0
+scikit-learn>=1.4.0
 pandas==2.2.3
+Pillow>=10.4.0
 pytest==8.3.3
-Pillow==10.4.0
+playwright==1.49.1

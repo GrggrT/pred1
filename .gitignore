@@ -17,3 +17,24 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# Dev artifacts
+test_*.html
+*.log
+quality_what_if_report.txt
+
+# Ablation results (keep .gitkeep)
+results/*.json
+
+# Claude Code settings
+.claude/settings.local.json
+.claude/settings.json
+
+# AI tool working directories
+codex_cabinet/
+image_generation_cabinet/
+web_designer_cabinet/
+
+# WSL artifacts
+*:Zone.Identifier
+=*
