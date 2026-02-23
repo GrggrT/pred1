@@ -3,13 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Football Value Betting — Admin</title>
+  <title>Football Value Betting — Админ</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800&family=Onest:wght@400;500;600;700&display=swap&subset=cyrillic" rel="stylesheet">
   <link rel="stylesheet" href="/ui/ui.css">
 </head>
 <body>
+  <a href="#main-content-root" class="skip-link">Перейти к содержимому</a>
+  <div id="notification-region" class="notification-region" aria-label="Уведомления"></div>
+
   <!-- Authentication check -->
   <div id="auth-container" class="auth-container">
     <div class="auth-card">
@@ -17,14 +20,14 @@
       <p class="mb-lg">Админ‑панель: лайв, история ставок, операции, данные.</p>
 
       <div class="form-group">
-        <label class="form-label">Admin token</label>
-        <input type="password" id="admin-token" class="form-input" placeholder="required">
+        <label class="form-label" for="admin-token">Токен администратора</label>
+        <input type="password" id="admin-token" class="form-input" placeholder="обязательно" aria-describedby="auth-error" aria-invalid="false" autocomplete="off">
       </div>
 
       <button type="button" class="btn" data-action="auth-submit">
         Войти
       </button>
-      <div id="auth-error" class="alert alert-danger mt-3 is-hidden"></div>
+      <div id="auth-error" class="alert alert-danger mt-3 is-hidden" role="alert" aria-live="assertive" aria-atomic="true" aria-hidden="true" tabindex="-1"></div>
     </div>
   </div>
 
@@ -44,17 +47,17 @@
           <a href="#dashboard" class="nav-item" data-section="dashboard">
             <div class="nav-left">
               <div class="nav-icon">🏠</div>
-              <span>Dashboard</span>
+              <span>Панель</span>
             </div>
-            <div class="nav-badge">Overview</div>
+            <div class="nav-badge">Обзор</div>
           </a>
 
           <a href="#info" class="nav-item" data-section="info">
             <div class="nav-left">
               <div class="nav-icon">🧾</div>
-              <span>Info</span>
+              <span>Инфо</span>
             </div>
-            <div class="nav-badge">Full</div>
+            <div class="nav-badge">Вероятности</div>
           </a>
 
           <a href="#system" class="nav-item" data-section="system">
@@ -62,7 +65,7 @@
               <div class="nav-icon">⚙️</div>
               <span>Система</span>
             </div>
-            <div class="nav-badge">Admin</div>
+            <div class="nav-badge">Админ</div>
           </a>
         </div>
       </nav>
@@ -71,19 +74,19 @@
     <!-- Main content -->
     <div class="main-content">
       <header class="header">
-        <button type="button" class="mobile-toggle" data-action="toggle-sidebar">☰</button>
+        <button type="button" class="mobile-toggle" data-action="toggle-sidebar" aria-label="Открыть меню" title="Открыть меню" aria-controls="sidebar" aria-expanded="false">☰</button>
         <div>
-          <h1 class="header-title" id="page-title">Dashboard</h1>
+          <h1 class="header-title" id="page-title">Панель</h1>
           <p class="header-subtitle" id="page-subtitle">Метрики и анализ ставок</p>
           <p class="header-meta" id="page-meta"></p>
         </div>
         <div class="header-actions">
-          <span id="connection-status" class="nav-badge">—</span>
+          <span id="connection-status" class="nav-badge" role="status" aria-live="polite">—</span>
           <button type="button" class="btn-secondary btn-sm" data-action="logout">Выйти</button>
         </div>
       </header>
 
-      <main class="content">
+      <main class="content" id="main-content-root" tabindex="-1">
         <!-- Dashboard Section -->
         <section id="dashboard" class="section active">
           <!-- KPI Cards Grid -->
@@ -101,7 +104,7 @@
             </div>
 
             <div class="card">
-              <h3 class="card-title">⚖️ Profit Factor</h3>
+              <h3 class="card-title">⚖️ Коэф. прибыли</h3>
               <div class="kpi-value" id="profit-factor">—</div>
               <div class="kpi-label" id="profit-factor-note">Риск-метрика</div>
             </div>
@@ -119,18 +122,34 @@
             </div>
           </div>
 
-          <!-- Content Grid -->
+          <div class="dashboard-ops-strip">
+            <div class="dashboard-ops-copy">
+              <div class="dashboard-ops-title">Операционный контур</div>
+              <div class="dashboard-ops-subtitle">Частые действия и мониторинг за один проход</div>
+            </div>
+            <div class="btn-group dashboard-ops-actions">
+              <button type="button" class="btn-secondary btn-sm" data-action="refresh-live" aria-label="Обновить дашборд и лайв" title="Обновить дашборд и лайв">🔄 Обновить</button>
+              <button type="button" class="btn-success btn-sm" data-action="run-job" data-job="full" aria-label="Запустить полный апдейт" title="Полный апдейт: sync_data → compute_indices → build_predictions → evaluate_results">🚀 Полный апдейт</button>
+              <button type="button" class="btn-secondary btn-sm" data-action="refresh-quality" data-refresh="1" aria-label="Пересчитать отчёт качества" title="Пересчитать отчёт качества">♻️ Качество</button>
+              <button type="button" class="btn-secondary btn-sm" data-action="toggle-bets-history" aria-label="Открыть или закрыть историю ставок" title="Открыть/закрыть историю ставок" aria-controls="bets-history-panel" aria-expanded="false">📋 История ставок</button>
+            </div>
+          </div>
+
+          <div class="dashboard-flow-head mt-3">
+            <h3 class="dashboard-flow-title">Операции и поток</h3>
+            <p class="dashboard-flow-subtitle">Лайв-сигналы и последние результаты по ставкам</p>
+          </div>
+
           <div class="row mt-3">
             <div class="col-md-6">
               <div class="card">
                 <div class="card-header">
                   <div class="header-left">
-                    <h3 class="card-title mb-0">🔴 Live Picks</h3>
+                    <h3 class="card-title mb-0">🔴 Лайв-пики</h3>
                     <div id="data-freshness" class="small text-muted">Обновление: —</div>
                   </div>
                   <div class="btn-group">
-                    <button type="button" class="btn-secondary btn-sm" data-action="refresh-live">🔄</button>
-                    <button type="button" class="btn-success btn-sm" data-action="run-job" data-job="full" title="Полный апдейт: sync_data → compute_indices → build_predictions → evaluate_results">📡 Обновить</button>
+                    <button type="button" class="btn-secondary btn-sm" data-action="refresh-live" aria-label="Обновить лайв-пики" title="Обновить лайв-пики">🔄</button>
                   </div>
                 </div>
                 <div id="live-picks" class="live-picks">Загрузка...</div>
@@ -141,6 +160,7 @@
               <div class="card">
                 <div class="card-header">
                   <h3 class="card-title mb-0">📋 Недавние ставки</h3>
+                  <label class="sr-only" for="stats-period">Период статистики недавних ставок</label>
                   <select id="stats-period" class="form-select select-compact">
                     <option value="7">7 дней</option>
                     <option value="30" selected>30 дней</option>
@@ -154,26 +174,34 @@
             </div>
           </div>
 
+          <div class="dashboard-flow-head mt-3">
+            <h3 class="dashboard-flow-title">Качество и аналитика</h3>
+            <p class="dashboard-flow-subtitle">Калибровка модели, CLV и сигналы риска</p>
+          </div>
+
           <div class="row mt-3">
             <div class="col-12">
               <div class="card">
                 <div class="card-header">
                   <div class="header-left">
-                    <h3 class="card-title mb-0">🧪 Quality Report</h3>
+                    <h3 class="card-title mb-0">🧪 Отчет качества</h3>
                     <div id="quality-report-meta" class="small text-muted">Обновление: —</div>
                   </div>
                   <div class="btn-group">
-                    <button type="button" class="btn-secondary btn-sm" data-action="refresh-quality">🔄</button>
-                    <button type="button" class="btn-secondary btn-sm" data-action="refresh-quality" data-refresh="1" title="Пересчитать сейчас">♻️</button>
+                    <button type="button" class="btn-secondary btn-sm" data-action="refresh-quality" aria-label="Обновить отчет качества" title="Обновить отчет качества">🔄</button>
                   </div>
                 </div>
                 <div id="quality-report" class="p-3">Загрузка...</div>
-                <div class="small text-muted p-3">
-                  Обновляется автоматически по расписанию (JOB_QUALITY_REPORT_CRON, 2 раза в день).
-                  Кнопка ♻️ пересчитает отчёт и обновит кэш.
-                  CLV считается по последнему pre‑kickoff snapshot букмекера (Bet365).
-                  Сигналы: n&lt;50 (мало данных), CLV coverage &lt;30% (warning), CLV &lt; 0 (risk), Brier&gt;0.27/LogLoss&gt;0.75 при n>=100.
-                </div>
+                <details class="small text-muted p-3">
+                  <summary>О сигналах качества</summary>
+                  <div class="mt-2">
+                    Обновляется автоматически по расписанию (JOB_QUALITY_REPORT_CRON, 2 раза в день).
+                    Кнопка ♻️ пересчитает отчёт и обновит кэш.
+                    CLV (closing line value) считается по последнему снапшоту перед стартом матча (Bet365).
+                    Сигналы: n&lt;50 (мало данных), покрытие CLV &lt;30% (внимание), CLV &lt; 0 (риск), Brier&gt;0.27 / LogLoss&gt;0.75 при n&gt;=100.
+                    Рынки: 1X2 — исход матча, TOTAL — тотал голов.
+                  </div>
+                </details>
               </div>
             </div>
           </div>
@@ -187,25 +215,25 @@
               <div class="card">
                 <div class="card-header">
                   <div class="header-left">
-                    <h3 class="card-title mb-0">🧾 Info‑вероятности</h3>
+                    <h3 class="card-title mb-0">🧾 Инфо‑вероятности</h3>
                     <div id="info-meta" class="small text-muted">Окно: —</div>
                   </div>
                   <div class="btn-group">
-                    <button type="button" class="btn-secondary btn-sm" data-action="refresh-info">🔄</button>
+                    <button type="button" class="btn-secondary btn-sm" data-action="refresh-info" aria-label="Обновить инфо-вероятности" title="Обновить инфо-вероятности">🔄</button>
                   </div>
                 </div>
                 <div class="live-filters info-filters">
                   <div class="row">
                     <div class="col-md-3">
-                      <label class="form-label">Дата от</label>
+                      <label class="form-label" for="info-date-from">Дата от</label>
                       <input type="date" id="info-date-from" class="form-input">
                     </div>
                     <div class="col-md-3">
-                      <label class="form-label">Дата до</label>
+                      <label class="form-label" for="info-date-to">Дата до</label>
                       <input type="date" id="info-date-to" class="form-input">
                     </div>
                     <div class="col-md-3">
-                      <label class="form-label">Лимит матчей</label>
+                      <label class="form-label" for="info-limit">Лимит матчей</label>
                       <select id="info-limit" class="form-select">
                         <option value="40">40</option>
                         <option value="80" selected>80</option>
@@ -215,32 +243,32 @@
                       </select>
                     </div>
                     <div class="col-md-3">
-                      <label class="form-label">Search (league/teams)</label>
-                      <input id="info-search" class="form-input" placeholder="e.g. Premier / Arsenal">
+                      <label class="form-label" for="info-search">Поиск (лига/команды)</label>
+                      <input id="info-search" class="form-input" placeholder="например Premier / Arsenal">
                     </div>
                   </div>
                   <div class="info-filter-actions">
-                    <label class="info-checkbox">
+                    <label class="info-checkbox" for="info-only-upcoming">
                       <input type="checkbox" id="info-only-upcoming">
-                      Только upcoming (NS)
+                      Только предстоящие (NS)
                     </label>
                     <div class="btn-group">
-                      <button type="button" class="btn-secondary btn-sm" data-action="info-apply">Apply</button>
-                      <button type="button" class="btn-secondary btn-sm" data-action="info-reset">Reset</button>
+                      <button type="button" class="btn-secondary btn-sm" data-action="info-apply">Применить</button>
+                      <button type="button" class="btn-secondary btn-sm" data-action="info-reset">Сброс</button>
                     </div>
                   </div>
                 </div>
-                <div class="info-tabs">
-                  <button type="button" class="btn-secondary btn-sm info-tab is-active" data-action="info-tab" data-tab="picks">Picks</button>
-                  <button type="button" class="btn-secondary btn-sm info-tab" data-action="info-tab" data-tab="stats">Stats</button>
+                <div class="info-tabs" role="tablist" aria-label="Инфо-представление">
+                  <button type="button" id="info-tab-picks" class="btn-secondary btn-sm info-tab is-active" data-action="info-tab" data-tab="picks" role="tab" aria-selected="true" aria-controls="info-picks-panel">Пики</button>
+                  <button type="button" id="info-tab-stats" class="btn-secondary btn-sm info-tab" data-action="info-tab" data-tab="stats" role="tab" aria-selected="false" aria-controls="info-stats-panel" tabindex="-1">Статистика</button>
                 </div>
-                <div id="info-picks-panel" class="info-panel">
+                <div id="info-picks-panel" class="info-panel" role="tabpanel" aria-labelledby="info-tab-picks" aria-hidden="false">
                   <div id="info-picks" class="live-picks">Загрузка...</div>
                 </div>
-                <div id="info-stats-panel" class="info-panel is-hidden">
+                <div id="info-stats-panel" class="info-panel is-hidden" role="tabpanel" aria-labelledby="info-tab-stats" aria-hidden="true">
                   <div id="info-stats" class="p-3">Загрузка...</div>
                   <div class="small text-muted p-3">
-                    ROI@2.0 — условный ROI при равных коэффициентах (bolvanка для изучения), logloss — по вероятности события.
+                    ROI@2.0 — условный ROI при равных коэффициентах (заготовка для анализа), LogLoss — по вероятности события.
                   </div>
                 </div>
               </div>
@@ -255,7 +283,7 @@
               <div class="card">
                 <div class="card-header">
                   <h3 class="card-title mb-0">🔄 Управление заданиями</h3>
-                  <button type="button" class="btn-secondary btn-sm" data-action="refresh-jobs">🔄</button>
+                  <button type="button" class="btn-secondary btn-sm" data-action="refresh-jobs" aria-label="Обновить задания" title="Обновить задания">🔄</button>
                 </div>
                 <div id="jobs-content" class="jobs-content">Загрузка заданий...</div>
               </div>
@@ -265,7 +293,7 @@
               <div class="card">
                 <div class="card-header">
                   <h3 class="card-title mb-0">💾 База данных</h3>
-                  <button type="button" class="btn-secondary btn-sm" data-action="refresh-db">🔄</button>
+                  <button type="button" class="btn-secondary btn-sm" data-action="refresh-db" aria-label="Обновить базу данных" title="Обновить базу данных">🔄</button>
                 </div>
                 <div id="database-content" class="database-content">Загрузка базы данных...</div>
               </div>
@@ -277,13 +305,13 @@
               <div class="card">
                 <div class="card-header">
                   <div class="header-left">
-                    <h3 class="card-title mb-0">🧠 Model Status</h3>
+                    <h3 class="card-title mb-0">🧠 Статус модели</h3>
                     <div id="model-updated" class="small text-muted">—</div>
                   </div>
                   <div class="btn-group">
-                    <button type="button" class="btn-secondary btn-sm" data-action="refresh-model">🔄</button>
-                    <button type="button" class="btn-success btn-sm" data-action="run-job" data-job="maintenance" title="DB-only refresh league params (draw/rho/alpha)">🧹 Refresh params</button>
-                    <button type="button" class="btn-danger btn-sm" data-action="run-job" data-job="rebuild_elo" title="Force full Elo rebuild from DB fixtures">🧠 Rebuild Elo</button>
+                    <button type="button" class="btn-secondary btn-sm" data-action="refresh-model" aria-label="Обновить статус модели" title="Обновить статус модели">🔄</button>
+                    <button type="button" class="btn-success btn-sm" data-action="run-job" data-job="maintenance" title="Обновить параметры лиг (доля ничьих, ρ/rho, α/alpha) только из БД">🧹 Обновить параметры</button>
+                    <button type="button" class="btn-danger btn-sm" data-action="run-job" data-job="rebuild_elo" title="Принудительно пересобрать Elo из матчей в БД">🧠 Пересобрать Elo</button>
                   </div>
                 </div>
                 <div id="model-content" class="model-content">Загрузка...</div>
@@ -296,12 +324,13 @@
   </div>
 
   <!-- Fixture details modal -->
-  <div id="fixture-modal" class="modal-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="fixture-modal-title">
+  <div id="fixture-modal" class="modal-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="fixture-modal-title" aria-describedby="fixture-modal-help">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title" id="fixture-modal-title">Match</div>
-        <button type="button" class="btn-secondary btn-sm" data-action="close-fixture-modal" aria-label="Close">✕</button>
+        <div class="modal-title" id="fixture-modal-title">Матч</div>
+        <button type="button" class="btn-secondary btn-sm" data-action="close-fixture-modal" aria-label="Закрыть" title="Закрыть окно">✕</button>
       </div>
+      <p id="fixture-modal-help" class="sr-only">Окно деталей матча. Используйте Tab для перемещения по элементам. Нажмите Escape, чтобы закрыть окно.</p>
       <div id="fixture-modal-body" class="modal-body">
         <p class="text-muted">Загрузка...</p>
       </div>

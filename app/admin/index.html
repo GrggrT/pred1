@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>FVB Admin — Управление</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b0f14">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800&family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/shared/tokens.css">
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+  <noscript><div style="padding:40px;text-align:center;font-family:sans-serif;color:#ccc;background:#0b0f14">Для работы панели администратора необходим JavaScript.</div></noscript>
+
+  <!-- Auth gate -->
+  <div id="auth-container" class="adm-auth">
+    <div class="adm-auth-card">
+      <div class="adm-auth-logo">&#9917; FVB</div>
+      <h1 class="adm-auth-title">Админ-панель</h1>
+      <p class="adm-auth-sub">Введите токен для входа</p>
+      <div class="adm-form-group">
+        <label class="adm-label" for="admin-token">Токен администратора</label>
+        <input type="password" id="admin-token" class="adm-input" placeholder="Токен доступа" autocomplete="current-password" aria-describedby="auth-error">
+      </div>
+      <button type="button" class="adm-btn adm-btn-primary" id="auth-submit">Войти</button>
+      <div id="auth-error" class="adm-alert adm-alert-danger hidden" role="alert"></div>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="main-app" class="adm-shell hidden">
+    <aside class="adm-sidebar" id="sidebar">
+      <div class="adm-brand">
+        <div class="adm-brand-title">&#9917; FVB Admin</div>
+      </div>
+      <nav class="adm-nav">
+        <a href="#operations" class="adm-nav-item active" data-section="operations">
+          <span class="adm-nav-icon">&#x2699;</span> Операции
+        </a>
+        <a href="#admin-matches" class="adm-nav-item" data-section="admin-matches">
+          <span class="adm-nav-icon">&#x26BD;</span> Матчи
+        </a>
+        <a href="#publishing" class="adm-nav-item" data-section="publishing">
+          <span class="adm-nav-icon">&#x1F4E4;</span> Публикации
+        </a>
+        <a href="#quality" class="adm-nav-item" data-section="quality">
+          <span class="adm-nav-icon">&#x1F4CA;</span> Качество
+        </a>
+        <a href="#system" class="adm-nav-item" data-section="system">
+          <span class="adm-nav-icon">&#x1F5A5;</span> Система
+        </a>
+      </nav>
+      <div class="adm-sidebar-footer">
+        <a href="/" class="adm-nav-link-ext" target="_blank">Публичный сайт &rarr;</a>
+        <div class="adm-sidebar-footer-row">
+          <button type="button" class="adm-btn-text adm-shortcut-hint" id="btn-shortcuts" title="Горячие клавиши: 1-5 разделы, R обновить, Esc закрыть">?</button>
+          <button type="button" class="adm-btn-text" id="btn-logout">Выйти</button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="adm-main">
+      <header class="adm-header">
+        <button type="button" class="adm-mobile-toggle" id="sidebar-toggle" aria-label="Меню">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="adm-header-titles">
+          <h1 class="adm-header-title" id="page-title">Операции</h1>
+          <p class="adm-header-sub" id="page-subtitle">Мониторинг и управление</p>
+        </div>
+      </header>
+
+      <main class="adm-content" id="content-root">
+
+        <!-- OPERATIONS -->
+        <section id="operations" class="adm-section active">
+          <div class="adm-health-strip" id="ops-health" aria-live="polite" aria-atomic="true">
+            <div class="adm-health-item"><span class="adm-health-dot"></span> Загрузка...</div>
+          </div>
+
+          <div class="adm-period-bar" id="ops-period-bar">
+            <button class="adm-period-btn" data-ops-days="7">7д</button>
+            <button class="adm-period-btn active" data-ops-days="30">30д</button>
+            <button class="adm-period-btn" data-ops-days="90">90д</button>
+            <button class="adm-period-btn" data-ops-days="365">Год</button>
+          </div>
+
+          <div class="adm-kpi-grid" id="ops-kpis" aria-live="polite">
+            <div class="adm-loading">Загрузка KPI...</div>
+          </div>
+
+          <div class="adm-action-rail">
+            <button class="adm-btn adm-btn-primary" data-action="run-job" data-job="full">Полный пайплайн</button>
+            <button class="adm-btn adm-btn-secondary" data-action="run-job" data-job="sync_data">Синхронизация</button>
+            <button class="adm-btn adm-btn-secondary" data-action="run-job" data-job="build_predictions">Прогнозы</button>
+            <button class="adm-btn adm-btn-secondary" data-action="run-job" data-job="evaluate_results">Оценка</button>
+            <button class="adm-btn adm-btn-secondary" data-action="run-job" data-job="quality_report">Качество</button>
+          </div>
+
+          <div class="adm-card">
+            <div class="adm-card-header">
+              <h3>Приоритетные матчи (все рынки)</h3>
+              <button class="adm-btn-sm adm-btn-secondary" data-action="refresh-ops">Обновить</button>
+            </div>
+            <div class="adm-picks-grid" id="ops-priority-feed">
+              <div class="adm-loading">Загрузка...</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- MATCHES -->
+        <section id="admin-matches" class="adm-section">
+          <div class="adm-filter-bar">
+            <select id="am-filter-league" class="adm-select" aria-label="Лига"><option value="">Все лиги</option></select>
+            <select id="am-filter-market" class="adm-select" aria-label="Рынок">
+              <option value="all">Все рынки</option>
+              <option value="1x2">1X2</option>
+              <option value="totals">Тотал 2.5</option>
+              <option value="total_1_5">Тотал 1.5</option>
+              <option value="total_3_5">Тотал 3.5</option>
+              <option value="btts">Обе забьют</option>
+              <option value="double_chance">Двойной шанс</option>
+            </select>
+            <select id="am-filter-status" class="adm-select" aria-label="Статус">
+              <option value="">Все статусы</option>
+              <option value="PENDING">Ожидание</option>
+              <option value="WIN">Выигрыш</option>
+              <option value="LOSS">Проигрыш</option>
+            </select>
+            <input type="text" id="am-filter-team" class="adm-input adm-input-sm" placeholder="Поиск команды..." aria-label="Команда">
+            <button class="adm-btn adm-btn-secondary adm-btn-sm" data-action="apply-match-filters">Применить</button>
+            <button class="adm-btn adm-btn-secondary adm-btn-sm" data-action="export-matches-csv" title="Экспорт CSV">CSV</button>
+          </div>
+          <div id="am-matches-list" class="adm-table-wrap"><div class="adm-loading">Загрузка...</div></div>
+          <div id="am-pagination" class="adm-pagination"></div>
+        </section>
+
+        <!-- PUBLISHING -->
+        <section id="publishing" class="adm-section">
+          <div class="adm-card">
+            <div class="adm-card-header"><h3>Готовые к публикации</h3></div>
+            <div id="pub-ready-list"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header">
+              <h3>История публикаций</h3>
+              <div class="adm-filter-inline">
+                <select id="pub-hist-status" class="adm-select adm-select-sm" aria-label="Статус">
+                  <option value="">Все</option>
+                  <option value="ok">OK</option>
+                  <option value="dry_run">Dry Run</option>
+                  <option value="skipped">Пропущено</option>
+                  <option value="failed">Ошибки</option>
+                </select>
+                <select id="pub-hist-hours" class="adm-select adm-select-sm" aria-label="Период">
+                  <option value="24">24ч</option>
+                  <option value="48" selected>48ч</option>
+                  <option value="168">Неделя</option>
+                  <option value="720">Месяц</option>
+                </select>
+                <button class="adm-btn-sm adm-btn-secondary" data-action="refresh-pub-history">Обновить</button>
+              </div>
+            </div>
+            <div id="pub-history-list"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header"><h3>Метрики публикаций</h3></div>
+            <div id="pub-metrics"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+        </section>
+
+        <!-- QUALITY -->
+        <section id="quality" class="adm-section">
+          <div class="adm-card">
+            <div class="adm-card-header">
+              <h3>Производительность по рынкам</h3>
+              <button class="adm-btn-sm adm-btn-secondary" data-action="refresh-quality">Обновить</button>
+            </div>
+            <div id="quality-market-perf"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header">
+              <h3>Динамика ROI</h3>
+              <div class="adm-filter-inline">
+                <select id="adm-chart-market-filter" class="adm-select adm-select-sm" aria-label="Рынок">
+                  <option value="">Все</option>
+                  <option value="1X2">1X2</option>
+                  <option value="TOTAL">Тотал 2.5</option>
+                  <option value="TOTAL_1_5">Тотал 1.5</option>
+                  <option value="TOTAL_3_5">Тотал 3.5</option>
+                  <option value="BTTS">Обе забьют</option>
+                  <option value="DOUBLE_CHANCE">Двойной шанс</option>
+                </select>
+                <button class="adm-btn-sm adm-btn-secondary adm-chart-download" data-download-chart="adm-roi-chart" title="Скачать PNG">&#x2193;</button>
+              </div>
+            </div>
+            <div class="adm-chart-wrap"><canvas id="adm-roi-chart" role="img" aria-label="График ROI"></canvas></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header">
+              <h3>Кривая прибыли</h3>
+              <button class="adm-btn-sm adm-btn-secondary adm-chart-download" data-download-chart="adm-profit-chart" title="Скачать PNG">&#x2193;</button>
+            </div>
+            <div class="adm-chart-wrap"><canvas id="adm-profit-chart" role="img" aria-label="График профита"></canvas></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header">
+              <h3>Калибровка модели</h3>
+              <button class="adm-btn-sm adm-btn-secondary adm-chart-download" data-download-chart="adm-calibration-chart" title="Скачать PNG">&#x2193;</button>
+            </div>
+            <div class="adm-chart-wrap"><canvas id="adm-calibration-chart" role="img" aria-label="График калибровки"></canvas></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header">
+              <h3>Отчёт качества модели</h3>
+              <div class="adm-filter-inline">
+                <button class="adm-btn-sm adm-btn-secondary" data-action="toggle-quality-details" title="Развернуть/свернуть все">&#x25BC; Все</button>
+                <button class="adm-btn-sm adm-btn-secondary" data-action="refresh-quality">Обновить</button>
+              </div>
+            </div>
+            <div id="quality-report"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header">
+              <h3>Статистика по лигам (90 дней)</h3>
+              <button class="adm-btn-sm adm-btn-secondary" data-action="export-quality-csv" title="Экспорт CSV">CSV</button>
+            </div>
+            <div id="quality-leagues"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header"><h3>Общие метрики модели</h3></div>
+            <div id="quality-stats"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+        </section>
+
+        <!-- SYSTEM -->
+        <section id="system" class="adm-section">
+          <div class="adm-card">
+            <div class="adm-card-header">
+              <h3>Задания</h3>
+              <button class="adm-btn-sm adm-btn-secondary" data-action="refresh-system">Обновить</button>
+            </div>
+            <div id="sys-jobs"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header"><h3>Последние запуски</h3></div>
+            <div id="sys-runs" class="adm-table-wrap"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header"><h3>Статус модели</h3></div>
+            <div id="sys-model"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header"><h3>Аудит действий</h3></div>
+            <div id="sys-audit"><div class="adm-loading">Загрузка...</div></div>
+          </div>
+          <div class="adm-card">
+            <div class="adm-card-header">
+              <h3>База данных</h3>
+              <div class="adm-filter-inline">
+                <select id="db-table" class="adm-select adm-select-sm" aria-label="Таблица">
+                  <option value="fixtures">fixtures</option>
+                  <option value="predictions">predictions</option>
+                  <option value="predictions_totals">predictions_totals</option>
+                  <option value="odds">odds</option>
+                  <option value="odds_snapshots">odds_snapshots</option>
+                  <option value="teams">teams</option>
+                  <option value="leagues">leagues</option>
+                  <option value="team_standings">team_standings</option>
+                  <option value="team_elo_ratings">team_elo_ratings</option>
+                  <option value="match_indices">match_indices</option>
+                  <option value="prediction_publications">prediction_publications</option>
+                  <option value="job_runs">job_runs</option>
+                </select>
+                <button class="adm-btn-sm adm-btn-secondary" data-action="browse-db">Показать</button>
+              </div>
+            </div>
+            <div id="sys-db" class="adm-table-wrap"><div class="adm-loading">Выберите таблицу</div></div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- Fixture Modal -->
+  <div id="fixture-modal" class="adm-modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="adm-modal">
+      <div class="adm-modal-header">
+        <h2 id="modal-title">Детали матча</h2>
+        <button class="adm-modal-close" data-action="close-modal" aria-label="Закрыть">&times;</button>
+      </div>
+      <div class="adm-modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Notification region -->
+  <div id="notification-region" class="adm-notifications" aria-live="polite"></div>
+
+  <script src="/admin/admin.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+/* Shared Design Tokens — Football Value Betting */
+:root {
+  /* Backgrounds */
+  --bg-0: #0b0f14;
+  --bg-1: #101826;
+  --bg-2: #141e2b;
+  --surface-1: rgba(14, 22, 34, 0.92);
+  --surface-2: rgba(18, 28, 42, 0.96);
+  --surface-3: rgba(20, 33, 49, 0.98);
+
+  /* Text */
+  --text-primary: #e6ebf2;
+  --text-secondary: #b8c3d6;
+  --text-muted: #8a97ad;
+
+  /* Accents */
+  --accent-primary: #b6f33d;
+  --accent-secondary: #38bdf8;
+  --accent-warning: #ff7a1a;
+  --accent-danger: #f43f5e;
+  --accent-success: #22c55e;
+
+  /* Borders */
+  --border-color: #1f2b3c;
+  --border-soft: #263548;
+  --border-glow: rgba(182, 243, 61, 0.35);
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+
+  /* Spacing */
+  --spacing-xs: 6px;
+  --spacing-sm: 10px;
+  --spacing-md: 14px;
+  --spacing-lg: 20px;
+  --spacing-xl: 28px;
+
+  /* Typography */
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 28px;
+  --font-size-3xl: 36px;
+  --font-display: "Exo 2", "Onest", sans-serif;
+  --font-body: "Onest", "Exo 2", sans-serif;
+
+  /* Shadows */
+  --shadow-soft: 0 10px 25px rgba(6, 10, 18, 0.45);
+  --shadow-card: 0 16px 36px rgba(2, 6, 12, 0.5);
+  --glow-primary: 0 0 25px rgba(182, 243, 61, 0.2);
+}
