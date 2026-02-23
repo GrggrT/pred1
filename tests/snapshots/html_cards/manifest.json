@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "en_hot_basic",
+      "file": "en_hot_basic.png",
+      "sha256": "414affa46bc5158174daf70fd0a87797743a6e1f4054288853f585baef539196",
+      "bytes": 2181855
+    },
+    {
+      "id": "en_top_long_names",
+      "file": "en_top_long_names.png",
+      "sha256": "8d9ac66adda03676f1bd8d516f0b6c7ad2def5aeaf385deb6a16fe2cc1ff01fa",
+      "bytes": 2076464
+    },
+    {
+      "id": "ru_top_layout",
+      "file": "ru_top_layout.png",
+      "sha256": "e8bd0f13dc21ebf1b5450dfc5dd40cdf3a86f6a4bfb09bb5dbeece00e31fd2ca",
+      "bytes": 2146091
+    },
+    {
+      "id": "en_extreme_odds",
+      "file": "en_extreme_odds.png",
+      "sha256": "e4857267c16e0e4fa015de0ef9eade84b3f52d9e8c6fb90dadd604b121d83d88",
+      "bytes": 2106176
+    },
+    {
+      "id": "en_no_form",
+      "file": "en_no_form.png",
+      "sha256": "1fb8b717b7f4f6a71135a8c15109e5a846ceedd3609d11ea4470f477740d1238",
+      "bytes": 2082462
+    },
+    {
+      "id": "en_viral_theme",
+      "file": "en_viral_theme.png",
+      "sha256": "f0dc3bff34fb28e641c33c071e5714d69cd46c0728b550e6dea775730b7dac99",
+      "bytes": 2160794
+    },
+    {
+      "id": "de_long_venue",
+      "file": "de_long_venue.png",
+      "sha256": "352e0a1df30c5bcf6f98d41061bbb7b345abf522ce40069c74dafb92071d855d",
+      "bytes": 2210077
+    },
+    {
+      "id": "sparse_inputs",
+      "file": "sparse_inputs.png",
+      "sha256": "cc3f9cf86de5f6d698db26ffa57b056c66cb9ea6024132d08c2ec6fe2bfa671f",
+      "bytes": 2091862
+    }
+  ]
+}
