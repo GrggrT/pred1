@@ -11,7 +11,7 @@ from typing import Callable
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import STATS_EPOCH, settings
 from app.core.decimalutils import D
 from app.core.logger import get_logger
 from app.core.timeutils import utcnow
@@ -359,10 +359,11 @@ async def _fetch_1x2(session: AsyncSession) -> list[BetRow]:
             WHERE p.selection_code IN ('HOME_WIN','DRAW','AWAY_WIN')
               AND p.status IN ('WIN','LOSS')
               AND p.initial_odd IS NOT NULL
+              AND p.settled_at >= :epoch
             ORDER BY f.kickoff DESC
             """
         ),
-        {"bid": settings.bookmaker_id},
+        {"bid": settings.bookmaker_id, "epoch": STATS_EPOCH},
     )
     rows: list[BetRow] = []
     for r in res.fetchall():
@@ -438,10 +439,11 @@ async def _fetch_totals(session: AsyncSession) -> list[BetRow]:
             ) o ON TRUE
             WHERE pt.status IN ('WIN','LOSS')
               AND pt.initial_odd IS NOT NULL
+              AND pt.settled_at >= :epoch
             ORDER BY f.kickoff DESC
             """
         ),
-        {"bid": settings.bookmaker_id},
+        {"bid": settings.bookmaker_id, "epoch": STATS_EPOCH},
     )
     _closing_map = {
         "OVER_2_5": "close_over", "UNDER_2_5": "close_under",

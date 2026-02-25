@@ -24,7 +24,7 @@ from sqlalchemy import text, bindparam
 from sqlalchemy.types import Integer, DateTime as SADateTime, String as SAString
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import STATS_EPOCH, settings
 from app.core.db import SessionLocal, get_session, init_db, engine
 from app.core.http import init_http_clients, close_http_clients
 from app.jobs import build_predictions, compute_indices, evaluate_results, sync_data, quality_report
@@ -3084,8 +3084,8 @@ async def api_dashboard(
     session: AsyncSession = Depends(get_session),
 ):
     """Enhanced dashboard metrics with trends and KPIs"""
-    cutoff = utcnow() - timedelta(days=days)
-    prev_cutoff = cutoff - timedelta(days=days)  # Previous period for comparison
+    cutoff = max(utcnow() - timedelta(days=days), STATS_EPOCH)
+    prev_cutoff = max(cutoff - timedelta(days=days), STATS_EPOCH)
 
     # Current period metrics
     current_stats = await session.execute(
@@ -4337,7 +4337,7 @@ async def public_stats(
     _rate: None = Depends(_check_public_rate),
     session: AsyncSession = Depends(get_session),
 ):
-    cutoff = utcnow() - timedelta(days=days)
+    cutoff = max(utcnow() - timedelta(days=days), STATS_EPOCH)
     res = await session.execute(
         text("""
             WITH combined AS (
@@ -4620,7 +4620,7 @@ async def public_results(
     response: Response,
     session: AsyncSession = Depends(get_session),
 ):
-    cutoff = utcnow() - timedelta(days=days)
+    cutoff = max(utcnow() - timedelta(days=days), STATS_EPOCH)
     cnt_res = await session.execute(
         text("""
             WITH combined AS (

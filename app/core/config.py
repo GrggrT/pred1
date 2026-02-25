@@ -9,6 +9,10 @@ from .decimalutils import q_ev, q_money, q_prob
 from .logger import get_logger
 
 
+# Stats are displayed only from this date onwards (production baseline).
+STATS_EPOCH = datetime(2026, 2, 23, tzinfo=timezone.utc)
+
+
 def _default_season() -> int:
     """European season year: Jul-Dec -> current year, Jan-Jun -> previous year."""
     now = datetime.now(timezone.utc)
