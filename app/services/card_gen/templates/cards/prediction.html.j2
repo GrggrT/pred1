@@ -1,0 +1,101 @@
+{# Card Gen v2 — Prediction card template.
+   Assembles all components into the exact layout from html_image.py.
+   Extends base.html.j2 which provides DOCTYPE, fonts, theme CSS, and .card wrapper.
+
+   Required context variables (provided by renderer.py):
+     fonts_css, theme_name, width, title_color, home_rgb, away_rgb,
+     home_logo_uri, away_logo_uri, league_logo_uri,
+     kicker_label, signal_title_display, signal_title_font_size,
+     signal_rows, card_title,
+     league_display, date_display, meta_secondary,
+     home_name, away_name, team_font_size,
+     odds_display, odds_font_size,
+     home_rank, away_rank, home_points, away_points,
+     home_played, away_played, home_gd, away_gd,
+     home_form, away_form,
+     has_chance, home_pct, draw_pct, away_pct,
+     home_share, draw_share, away_share,
+     pick_display, disclaimer, venue_label
+#}
+{% extends "base.html.j2" %}
+
+{% block content %}
+    {# ── Header: signal + meta ────────────────────────────── #}
+    <header class="top">
+      {% include "components/signal_card.html.j2" %}
+
+      <div class="meta-stack">
+        <div class="meta-card">
+          <div class="meta-league">
+            <img class="league-logo" src="{{ league_logo_uri }}" alt="league logo" />
+            <span>{{ league_display }}</span>
+          </div>
+          <div class="meta-date">{{ date_display }}</div>
+          {% if meta_secondary %}
+          <div class="meta-secondary">{{ meta_secondary }}</div>
+          {% endif %}
+        </div>
+      </div>
+    </header>
+
+    {# ── Match stage: teams + odds + standings ────────────── #}
+    <section class="match-stage">
+      <div class="teams">
+        {# Home team #}
+        {% with side="home", logo_uri=home_logo_uri, team_name=home_name %}
+        {% include "components/team_badge.html.j2" %}
+        {% endwith %}
+
+        {# Central odds sphere #}
+        {% include "components/odds_sphere.html.j2" %}
+
+        {# Away team #}
+        {% with side="away", logo_uri=away_logo_uri, team_name=away_name %}
+        {% include "components/team_badge.html.j2" %}
+        {% endwith %}
+      </div>
+
+      {# Table strip (standings) #}
+      <div class="table-strip">
+        <div class="table-team home">
+          <div class="table-main">
+            <span class="table-rank">{{ home_rank }}</span>
+            <span class="table-points">{{ home_points }}</span>
+          </div>
+          <div class="table-sub">
+            <span>{{ home_played }}</span>
+            <span>{{ home_gd }}</span>
+          </div>
+          <div class="form-track">
+            {% with form=home_form %}
+            {% include "components/form_dots.html.j2" %}
+            {% endwith %}
+          </div>
+        </div>
+        <div class="table-team away">
+          <div class="table-main">
+            <span class="table-rank">{{ away_rank }}</span>
+            <span class="table-points">{{ away_points }}</span>
+          </div>
+          <div class="table-sub">
+            <span>{{ away_played }}</span>
+            <span>{{ away_gd }}</span>
+          </div>
+          <div class="form-track">
+            {% with form=away_form %}
+            {% include "components/form_dots.html.j2" %}
+            {% endwith %}
+          </div>
+        </div>
+      </div>
+
+      {# Chance meter (probability bar) #}
+      {% include "components/chance_bar.html.j2" %}
+
+      {# Venue line #}
+      {% include "components/venue_line.html.j2" %}
+    </section>
+
+    {# ── Pick section ─────────────────────────────────────── #}
+    {% include "components/prediction_badge.html.j2" %}
+{% endblock %}

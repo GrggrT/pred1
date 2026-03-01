@@ -1,0 +1,105 @@
+{# Card Gen v2 — Result card template.
+   Post-match card showing score, outcome status, and profit.
+   Extends base.html.j2. Reuses team_badge, form_dots, venue_line.
+   Replaces odds_sphere with score_display, prediction_badge with result_overlay.
+
+   Required context variables (provided by renderer.py _build_result_context):
+     fonts_css, theme_name, width, title_color, home_rgb, away_rgb,
+     result_status ("win"|"loss"),
+     home_logo_uri, away_logo_uri, league_logo_uri,
+     result_status_display, result_profit_display,
+     league_display, date_display, meta_secondary,
+     home_name, away_name, team_font_size,
+     home_goals, away_goals,
+     home_rank, away_rank, home_points, away_points,
+     home_played, away_played, home_gd, away_gd,
+     home_form, away_form,
+     result_main_text, original_pick_display,
+     disclaimer, venue_label
+#}
+{% extends "base.html.j2" %}
+
+{% block content %}
+    {# ── Result tint overlay ───────────────────────────────── #}
+    <div class="result-tint"></div>
+
+    {# ── Header: status + meta ─────────────────────────────── #}
+    <header class="top">
+      <div class="status-card">
+        <div class="status-label">MATCH RESULT</div>
+        <div class="status-value {{ result_status }}">{{ result_status_display }}</div>
+        <div class="status-profit {{ result_status }}">{{ result_profit_display }}</div>
+      </div>
+
+      <div class="meta-stack">
+        <div class="meta-card">
+          <div class="meta-league">
+            <img class="league-logo" src="{{ league_logo_uri }}" alt="league logo" />
+            <span>{{ league_display }}</span>
+          </div>
+          <div class="meta-date">{{ date_display }}</div>
+          {% if meta_secondary %}
+          <div class="meta-secondary">{{ meta_secondary }}</div>
+          {% endif %}
+        </div>
+      </div>
+    </header>
+
+    {# ── Match stage: teams + score + standings ────────────── #}
+    <section class="match-stage">
+      <div class="teams">
+        {# Home team #}
+        {% with side="home", logo_uri=home_logo_uri, team_name=home_name %}
+        {% include "components/team_badge.html.j2" %}
+        {% endwith %}
+
+        {# Central score display #}
+        {% include "components/score_display.html.j2" %}
+
+        {# Away team #}
+        {% with side="away", logo_uri=away_logo_uri, team_name=away_name %}
+        {% include "components/team_badge.html.j2" %}
+        {% endwith %}
+      </div>
+
+      {# Table strip (standings) #}
+      <div class="table-strip">
+        <div class="table-team home">
+          <div class="table-main">
+            <span class="table-rank">{{ home_rank }}</span>
+            <span class="table-points">{{ home_points }}</span>
+          </div>
+          <div class="table-sub">
+            <span>{{ home_played }}</span>
+            <span>{{ home_gd }}</span>
+          </div>
+          <div class="form-track">
+            {% with form=home_form %}
+            {% include "components/form_dots.html.j2" %}
+            {% endwith %}
+          </div>
+        </div>
+        <div class="table-team away">
+          <div class="table-main">
+            <span class="table-rank">{{ away_rank }}</span>
+            <span class="table-points">{{ away_points }}</span>
+          </div>
+          <div class="table-sub">
+            <span>{{ away_played }}</span>
+            <span>{{ away_gd }}</span>
+          </div>
+          <div class="form-track">
+            {% with form=away_form %}
+            {% include "components/form_dots.html.j2" %}
+            {% endwith %}
+          </div>
+        </div>
+      </div>
+
+      {# Venue line #}
+      {% include "components/venue_line.html.j2" %}
+    </section>
+
+    {# ── Result section ────────────────────────────────────── #}
+    {% include "components/result_overlay.html.j2" %}
+{% endblock %}

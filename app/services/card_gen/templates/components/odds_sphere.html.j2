@@ -1,0 +1,12 @@
+{# Card Gen v2 — Odds sphere component.
+   Central glass sphere showing the odds value.
+   Context: odds_display (str), odds_font_size (int)
+#}
+<div class="odds-core">
+  <div class="odds-shell">
+    <div class="odds-inner">
+      <div class="odds-value" style="font-size:{{ odds_font_size }}px">{{ odds_display }}</div>
+      <div class="odds-label">ODDS</div>
+    </div>
+  </div>
+</div>

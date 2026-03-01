@@ -24,6 +24,12 @@ try:
     from app.services.html_image import render_headline_image_html
 except Exception:  # pragma: no cover - startup must survive optional renderer failures
     render_headline_image_html = None
+try:
+    from app.services.card_gen import render_card as _card_gen_v2_render
+    from app.services.card_gen.compat import build_prediction_card as _build_v2_card
+except Exception:  # pragma: no cover
+    _card_gen_v2_render = None  # type: ignore[assignment]
+    _build_v2_card = None  # type: ignore[assignment]
 from app.jobs import quality_report
 
 log = get_logger("services.publishing")
@@ -3771,7 +3777,35 @@ async def build_post_preview(
                 "signal_line_2": indicator_line_2,
                 "signal_line_3": indicator_line_3,
             }
-            if render_headline_image_html is not None:
+            if settings.card_gen_v2 and _card_gen_v2_render is not None and _build_v2_card is not None:
+                render_started = time.perf_counter()
+                try:
+                    v2_card = _build_v2_card(
+                        fixture=fixture,
+                        image_visual_context=image_visual_context,
+                        image_text=image_text,
+                        html_image_kwargs=html_image_kwargs,
+                        home_win_prob=home_win_prob,
+                        draw_prob=draw_prob,
+                        away_win_prob=away_win_prob,
+                        indicator_title=indicator_title,
+                        indicator_lines=[indicator_line_1, indicator_line_2, indicator_line_3],
+                    )
+                    image_bytes = await _card_gen_v2_render(v2_card)
+                    render_time_ms = int((time.perf_counter() - render_started) * 1000)
+                    encoded = base64.b64encode(image_bytes).decode("ascii")
+                    image_data_url = f"data:image/jpeg;base64,{encoded}"
+                    uses_image = True
+                except Exception:
+                    render_time_ms = int((time.perf_counter() - render_started) * 1000)
+                    image_fallback_reason = "card_gen_v2_failed"
+                    log.exception(
+                        "card_gen_v2_preview_failed fixture=%s market=%s lang=%s",
+                        fixture_id,
+                        market_name,
+                        lang_key,
+                    )
+            elif render_headline_image_html is not None:
                 render_started = time.perf_counter()
                 try:
                     image_bytes = await asyncio.to_thread(
@@ -4254,7 +4288,61 @@ async def publish_fixture(
                         "signal_line_2": indicator_line_2,
                         "signal_line_3": indicator_line_3,
                     }
-                    if render_headline_image_html is not None:
+                    if settings.card_gen_v2 and _card_gen_v2_render is not None and _build_v2_card is not None:
+                        render_started = time.perf_counter()
+                        try:
+                            v2_card = _build_v2_card(
+                                fixture=fixture,
+                                image_visual_context=image_visual_context,
+                                image_text=image_text,
+                                html_image_kwargs=html_image_kwargs,
+                                home_win_prob=home_win_prob,
+                                draw_prob=draw_prob,
+                                away_win_prob=away_win_prob,
+                                indicator_title=indicator_title,
+                                indicator_lines=[indicator_line_1, indicator_line_2, indicator_line_3],
+                            )
+                            image_bytes = await _card_gen_v2_render(v2_card)
+                            render_time_ms = int((time.perf_counter() - render_started) * 1000)
+                            photo_id = await send_photo(channel_id, image_bytes)
+                            headline_ids = [photo_id]
+                            analysis_ids = await send_message_parts(
+                                channel_id,
+                                analysis_parts,
+                                reply_to_message_id=photo_id,
+                            )
+                            used_headline_image = True
+                        except Exception:
+                            render_time_ms = int((time.perf_counter() - render_started) * 1000)
+                            html_render_failed = True
+                            log.exception(
+                                "card_gen_v2_failed fixture=%s market=%s lang=%s fallback=text",
+                                fixture_id,
+                                market["market"],
+                                lang,
+                            )
+                            image_fallback_reason = "card_gen_v2_failed"
+                            await _record_publication(
+                                session,
+                                fixture_id,
+                                market["market"],
+                                lang,
+                                channel_id,
+                                "render_failed",
+                                experimental=experimental,
+                                content_hash=content_hash,
+                                idempotency_key=idempotency_key,
+                                payload={
+                                    "reason": "card_gen_v2_failed",
+                                    "headline_image": False,
+                                    "headline_image_fallback": image_fallback_reason,
+                                    "html_attempted": True,
+                                    "html_render_failed": True,
+                                    "render_time_ms": render_time_ms,
+                                    "image_theme": image_theme_norm,
+                                },
+                            )
+                    elif render_headline_image_html is not None:
                         render_started = time.perf_counter()
                         try:
                             image_bytes = await asyncio.to_thread(

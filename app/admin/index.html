@@ -5,21 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>FVB Admin — Управление</title>
   <meta name="robots" content="noindex, nofollow">
-  <meta name="theme-color" content="#0b0f14">
+  <meta name="theme-color" content="#080c14">
+  <meta name="color-scheme" content="dark">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800&family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/shared/tokens.css">
   <link rel="stylesheet" href="/admin/admin.css">
 </head>
 <body>
-  <noscript><div style="padding:40px;text-align:center;font-family:sans-serif;color:#ccc;background:#0b0f14">Для работы панели администратора необходим JavaScript.</div></noscript>
+  <noscript><div style="padding:40px;text-align:center;font-family:sans-serif;color:#ccc;background:#080c14">Для работы панели администратора необходим JavaScript.</div></noscript>
 
   <!-- Auth gate -->
   <div id="auth-container" class="adm-auth">
     <div class="adm-auth-card">
-      <div class="adm-auth-logo">&#9917; FVB</div>
+      <div class="adm-auth-logo">FVB</div>
       <h1 class="adm-auth-title">Админ-панель</h1>
       <p class="adm-auth-sub">Введите токен для входа</p>
       <div class="adm-form-group">
@@ -35,7 +36,11 @@
   <div id="main-app" class="adm-shell hidden">
     <aside class="adm-sidebar" id="sidebar">
       <div class="adm-brand">
-        <div class="adm-brand-title">&#9917; FVB Admin</div>
+        <div class="adm-brand-mark">F</div>
+        <div class="adm-brand-text">
+          <span class="adm-brand-title">FVB Admin</span>
+          <span class="adm-brand-sub">control panel</span>
+        </div>
       </div>
       <nav class="adm-nav">
         <a href="#operations" class="adm-nav-item active" data-section="operations">

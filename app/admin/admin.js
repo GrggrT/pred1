@@ -90,7 +90,7 @@
 
   function _logoPlaceholder(alt, size) {
     const letter = alt ? alt.charAt(0).toUpperCase() : '?';
-    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;background:var(--surface-3);border-radius:50%;font-size:${Math.round(size * 0.45)}px;color:var(--text-muted);font-weight:600">${esc(letter)}</span>`;
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;background:var(--bg-3);border-radius:50%;font-size:${Math.round(size * 0.45)}px;color:var(--muted);font-weight:600">${esc(letter)}</span>`;
   }
 
   function logoImg(url, alt, size) {
@@ -114,7 +114,7 @@
   }
 
   function errorHtml(msg, section) {
-    return '<div class="adm-loading" style="color:var(--accent-danger)">' + esc(msg) +
+    return '<div class="adm-loading" style="color:var(--red)">' + esc(msg) +
       (section ? ' <button class="adm-btn adm-btn-sm adm-btn-secondary" onclick="location.hash=\'#' + section + '\';location.reload()">Повторить</button>' : '') + '</div>';
   }
 
@@ -257,7 +257,7 @@
     const dlg = document.createElement('div');
     dlg.className = 'adm-modal adm-confirm-dialog';
     dlg.innerHTML = '<div class="adm-modal-header"><h2>' + esc(title) + '</h2></div>' +
-      '<div class="adm-modal-body"><p style="margin:0;color:var(--text-secondary)">' + esc(message) + '</p></div>' +
+      '<div class="adm-modal-body"><p style="margin:0;color:var(--text-2)">' + esc(message) + '</p></div>' +
       '<div class="adm-confirm-actions">' +
       '<button class="adm-btn adm-btn-secondary" data-confirm="cancel">Отмена</button>' +
       '<button class="adm-btn adm-btn-primary adm-btn-danger" data-confirm="ok">Подтвердить</button></div>';
@@ -455,7 +455,7 @@
     }).join('');
     var now = new Date();
     var _opsUpdatedAt = now.toISOString();
-    html += '<div class="adm-health-item" style="margin-left:auto;font-size:11px;color:var(--text-muted)" title="' + formatDate(_opsUpdatedAt) + '">' + timeAgo(_opsUpdatedAt) + '</div>';
+    html += '<div class="adm-health-item" style="margin-left:auto;font-size:11px;color:var(--muted)" title="' + formatDate(_opsUpdatedAt) + '">' + timeAgo(_opsUpdatedAt) + '</div>';
     cont.innerHTML = html;
   }
 
@@ -521,7 +521,7 @@
 
   function renderPriorityFeed(picks) {
     const cont = el('ops-priority-feed');
-    if (!picks || !picks.length) { cont.innerHTML = '<div class="adm-loading" style="color:var(--text-muted)">Нет приоритетных матчей. Запустите «Синхронизация» → «Прогнозы»</div>'; return; }
+    if (!picks || !picks.length) { cont.innerHTML = '<div class="adm-loading" style="color:var(--muted)">Нет приоритетных матчей. Запустите «Синхронизация» → «Прогнозы»</div>'; return; }
     cont.innerHTML = picks.map(p => pickCardHtml(p)).join('');
   }
 
@@ -603,7 +603,7 @@
   function renderMatchesTable(rows, total) {
     const cont = el('am-matches-list');
     if (!rows || !rows.length) {
-      cont.innerHTML = '<div class="adm-loading" style="color:var(--text-muted)">Нет матчей по текущим фильтрам. Попробуйте сбросить параметры</div>';
+      cont.innerHTML = '<div class="adm-loading" style="color:var(--muted)">Нет матчей по текущим фильтрам. Попробуйте сбросить параметры</div>';
       el('am-pagination').innerHTML = '';
       return;
     }
@@ -621,16 +621,16 @@
     rows.forEach(r => {
       const pickLabel = PICK_LABELS[r.pick] || r.pick || '—';
       const ev = r.ev != null ? (r.ev * 100).toFixed(1) + '%' : '—';
-      const evStyle = r.ev != null ? (r.ev >= 0.1 ? 'color:var(--accent-primary);font-weight:600' : r.ev >= 0 ? 'color:var(--accent-success)' : 'color:var(--text-muted)') : '';
+      const evStyle = r.ev != null ? (r.ev >= 0.1 ? 'color:var(--accent);font-weight:600' : r.ev >= 0 ? 'color:var(--green)' : 'color:var(--muted)') : '';
       const signal = r.signal_score != null ? (r.signal_score * 100).toFixed(0) + '%' : '—';
       const profit = r.profit != null ? (r.profit >= 0 ? '+' : '') + r.profit.toFixed(2) : '—';
-      const profitStyle = r.profit != null ? (r.profit >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)') : '';
+      const profitStyle = r.profit != null ? (r.profit >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
       const market = MARKET_LABELS[r.market] || r._market || r.market || '1X2';
       const score = r.score || (r.home_goals != null ? r.home_goals + '-' + r.away_goals : '');
       html += '<tr data-fixture-id="' + r.fixture_id + '">' +
         '<td>' + formatDate(r.kickoff) + '</td>' +
         '<td>' + logoImg(r.home_logo_url, r.home, 18) + ' ' + esc(r.home || '') + ' — ' + esc(r.away || '') + ' ' + logoImg(r.away_logo_url, r.away, 18) +
-        (score ? ' <span style="color:var(--text-muted);font-size:var(--font-size-xs)">' + esc(score) + '</span>' : '') + '</td>' +
+        (score ? ' <span style="color:var(--muted);font-size:var(--font-size-xs)">' + esc(score) + '</span>' : '') + '</td>' +
         '<td>' + esc(r.league || '') + '</td>' +
         '<td>' + esc(market) + '</td>' +
         '<td><span class="adm-badge adm-badge-pick">' + esc(pickLabel) + '</span></td>' +
@@ -689,7 +689,7 @@
 
   function renderPublishReady(picks) {
     const cont = el('pub-ready-list');
-    if (!picks || !picks.length) { cont.innerHTML = '<div class="adm-loading" style="color:var(--text-muted)">Нет матчей для публикации. Все прогнозы уже опубликованы или ожидают данных</div>'; return; }
+    if (!picks || !picks.length) { cont.innerHTML = '<div class="adm-loading" style="color:var(--muted)">Нет матчей для публикации. Все прогнозы уже опубликованы или ожидают данных</div>'; return; }
     // Filter to NS (not started) fixtures only for publishing
     const nsPicks = picks.filter(p => p.fixture_status === 'NS' && p.status === 'PENDING');
     const displayPicks = nsPicks.length ? nsPicks : picks;
@@ -700,7 +700,7 @@
       return '<div class="adm-job-row">' +
         '<div style="flex:1">' +
         '<strong>' + esc(p.home || p.home_name) + ' — ' + esc(p.away || p.away_name) + '</strong>' +
-        '<span style="color:var(--text-muted);font-size:var(--font-size-xs);margin-left:8px">' + esc(p.league || '') + ' &middot; ' + formatDate(p.kickoff) + '</span>' +
+        '<span style="color:var(--muted);font-size:var(--font-size-xs);margin-left:8px">' + esc(p.league || '') + ' &middot; ' + formatDate(p.kickoff) + '</span>' +
         '</div>' +
         '<span class="adm-badge adm-badge-pick">' + esc(pickLabel) + '</span>' +
         (odd != null ? '<span class="adm-badge adm-badge-odd">' + Number(odd).toFixed(2) + '</span>' : '') +
@@ -732,13 +732,13 @@
       if (a.triggered) {
         html += '<div class="adm-alert adm-alert-danger">Алерт: ' + esc(a.metric || '') + ' превысил порог ' + (a.threshold_pct || 0) + '%</div>';
       } else {
-        html += '<div style="font-size:var(--font-size-xs);color:var(--accent-success);margin-top:4px">Алертов нет. Мониторинг: ' + esc(a.metric || '') + ' (порог ' + (a.threshold_pct || 0) + '%)</div>';
+        html += '<div style="font-size:var(--font-size-xs);color:var(--green);margin-top:4px">Алертов нет. Мониторинг: ' + esc(a.metric || '') + ' (порог ' + (a.threshold_pct || 0) + '%)</div>';
       }
     }
 
     // Rendering stats
     if (data.render_time_ms && data.render_time_ms.samples > 0) {
-      html += '<div style="font-size:var(--font-size-xs);color:var(--text-muted);margin-top:8px">Рендеринг: avg ' + (data.render_time_ms.avg || 0).toFixed(0) + 'мс, p95 ' + (data.render_time_ms.p95 || 0).toFixed(0) + 'мс</div>';
+      html += '<div style="font-size:var(--font-size-xs);color:var(--muted);margin-top:8px">Рендеринг: avg ' + (data.render_time_ms.avg || 0).toFixed(0) + 'мс, p95 ' + (data.render_time_ms.p95 || 0).toFixed(0) + 'мс</div>';
     }
 
     cont.innerHTML = html;
@@ -853,12 +853,12 @@
     if (_cc) return _cc;
     const s = getComputedStyle(document.documentElement);
     _cc = {
-      grid: 'rgba(31,43,60,0.5)',
-      muted: s.getPropertyValue('--text-muted').trim() || '#8a97ad',
-      accent: s.getPropertyValue('--accent-primary').trim() || '#b6f33d',
-      danger: s.getPropertyValue('--accent-danger').trim() || '#f43f5e',
-      secondary: s.getPropertyValue('--accent-secondary').trim() || '#38bdf8',
-      font: '11px ' + (s.getPropertyValue('--font-body').trim() || 'Onest, sans-serif'),
+      grid: 'rgba(32,48,72,0.5)',
+      muted: s.getPropertyValue('--muted').trim() || '#64748b',
+      accent: s.getPropertyValue('--accent').trim() || '#b6f33d',
+      danger: s.getPropertyValue('--red').trim() || '#ef4444',
+      secondary: s.getPropertyValue('--blue').trim() || '#38bdf8',
+      font: '11px ' + (s.getPropertyValue('--font-mono').trim() || 'JetBrains Mono, monospace'),
     };
     return _cc;
   }
@@ -970,7 +970,7 @@
   function drawAdmCalibrationChart(canvas, bins) {
     const setup = _admChartSetup(canvas);
     if (!setup || !bins || !bins.length) {
-      if (canvas) canvas.parentElement.innerHTML = '<div class="adm-loading" style="color:var(--text-muted)">Нет данных калибровки. Запустите «Отчёт качества»</div>';
+      if (canvas) canvas.parentElement.innerHTML = '<div class="adm-loading" style="color:var(--muted)">Нет данных калибровки. Запустите «Отчёт качества»</div>';
       delete _chartPoints['adm-calibration-chart'];
       return;
     }
@@ -1047,15 +1047,15 @@
     rows.forEach(([mkt, v]) => {
       const label = MARKET_LABELS[mkt] || mkt;
       const roi = v.roi || 0;
-      const roiStyle = roi >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)';
-      const profitStyle = (v.total_profit || 0) >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)';
+      const roiStyle = roi >= 0 ? 'color:var(--green)' : 'color:var(--red)';
+      const profitStyle = (v.total_profit || 0) >= 0 ? 'color:var(--green)' : 'color:var(--red)';
       html += '<tr><td><strong>' + esc(label) + '</strong></td><td>' + (v.settled || 0) + '</td><td>' + (v.wins || 0) + '</td><td>' + (v.losses || 0) + '</td><td>' + (v.win_rate || 0).toFixed(1) + '%</td><td style="' + roiStyle + ';font-weight:600">' + roi.toFixed(1) + '%</td><td style="' + profitStyle + ';font-weight:600">' + (v.total_profit >= 0 ? '+' : '') + (v.total_profit || 0).toFixed(2) + '</td></tr>';
     });
     const allRoi = totals.settled > 0 ? (totals.profit / totals.settled) * 100 : 0;
     const allWr = totals.settled > 0 ? (totals.wins / totals.settled) * 100 : 0;
-    const allRoiStyle = allRoi >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)';
-    const allProfitStyle = totals.profit >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)';
-    html += '<tr style="border-top:2px solid var(--border-color);font-weight:700"><td>ИТОГО</td><td>' + totals.settled + '</td><td>' + totals.wins + '</td><td>' + totals.losses + '</td><td>' + allWr.toFixed(1) + '%</td><td style="' + allRoiStyle + '">' + allRoi.toFixed(1) + '%</td><td style="' + allProfitStyle + '">' + (totals.profit >= 0 ? '+' : '') + totals.profit.toFixed(2) + '</td></tr>';
+    const allRoiStyle = allRoi >= 0 ? 'color:var(--green)' : 'color:var(--red)';
+    const allProfitStyle = totals.profit >= 0 ? 'color:var(--green)' : 'color:var(--red)';
+    html += '<tr style="border-top:2px solid var(--border);font-weight:700"><td>ИТОГО</td><td>' + totals.settled + '</td><td>' + totals.wins + '</td><td>' + totals.losses + '</td><td>' + allWr.toFixed(1) + '%</td><td style="' + allRoiStyle + '">' + allRoi.toFixed(1) + '%</td><td style="' + allProfitStyle + '">' + (totals.profit >= 0 ? '+' : '') + totals.profit.toFixed(2) + '</td></tr>';
     html += '</tbody></table>';
     cont.innerHTML = html;
   }
@@ -1078,7 +1078,7 @@
       const cal = mdata.calibration || {};
 
       let html = '<div style="margin-bottom:20px">';
-      html += '<h4 style="margin:0 0 12px;color:var(--text-primary);font-size:var(--font-size-md)">' + esc(MARKET_LABELS[market.toUpperCase()] || MARKET_LABELS[market] || market.toUpperCase()) + '</h4>';
+      html += '<h4 style="margin:0 0 12px;color:var(--text);font-size:var(--font-size-md)">' + esc(MARKET_LABELS[market.toUpperCase()] || MARKET_LABELS[market] || market.toUpperCase()) + '</h4>';
       html += '<div class="adm-kpi-grid" style="margin-bottom:12px">';
       html += kpiMini('Ставок', s.bets || 0);
       html += kpiMini('Win Rate', s.win_rate != null ? s.win_rate.toFixed(1) + '%' : '—');
@@ -1097,7 +1097,7 @@
         html += '<table class="adm-table" style="margin-top:8px"><thead><tr><th>Бин</th><th>Ставок</th><th>Ср. вер.</th><th>Win Rate</th><th title="Отклонение факт. win rate от предсказанной вероятности. Красный = > 10%">Откл.</th></tr></thead><tbody>';
         cal.bins.forEach(b => {
           const dev = b.avg_prob != null && b.win_rate != null ? (b.win_rate - b.avg_prob) : null;
-          const devCls = dev != null ? (Math.abs(dev) > 0.1 ? 'color:var(--accent-danger)' : 'color:var(--accent-success)') : '';
+          const devCls = dev != null ? (Math.abs(dev) > 0.1 ? 'color:var(--red)' : 'color:var(--green)') : '';
           html += '<tr><td>' + esc(b.bin) + '</td><td>' + (b.bets || 0) + '</td><td>' + (b.avg_prob != null ? b.avg_prob.toFixed(3) : '—') + '</td><td>' + (b.win_rate != null ? b.win_rate.toFixed(3) : '—') + '</td><td style="' + devCls + '">' + (dev != null ? (dev >= 0 ? '+' : '') + dev.toFixed(3) : '—') + '</td></tr>';
         });
         html += '</tbody></table></details>';
@@ -1108,7 +1108,7 @@
         html += '<details style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:600;font-size:var(--font-size-sm)">По лигам</summary>';
         html += '<table class="adm-table" style="margin-top:8px"><thead><tr><th>Лига</th><th>Ставок</th><th>Win Rate</th><th>ROI</th><th>Ср. кф.</th></tr></thead><tbody>';
         mdata.by_league.forEach(l => {
-          const roiStyle = l.roi != null ? (l.roi >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)') : '';
+          const roiStyle = l.roi != null ? (l.roi >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
           html += '<tr><td>' + esc(l.league_name || 'ID ' + l.league_id) + '</td><td>' + (l.bets || 0) + '</td><td>' + (l.win_rate != null ? l.win_rate.toFixed(1) + '%' : '—') + '</td><td style="' + roiStyle + ';font-weight:600">' + (l.roi != null ? l.roi.toFixed(1) + '%' : '—') + '</td><td>' + (l.avg_odd != null ? l.avg_odd.toFixed(2) : '—') + '</td></tr>';
         });
         html += '</tbody></table></details>';
@@ -1119,7 +1119,7 @@
         html += '<details style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:600;font-size:var(--font-size-sm)">По коэффициентам</summary>';
         html += '<table class="adm-table" style="margin-top:8px"><thead><tr><th>Диапазон</th><th>Ставок</th><th>Win Rate</th><th>ROI</th></tr></thead><tbody>';
         mdata.by_odds_bucket.forEach(b => {
-          const roiStyle = b.roi != null ? (b.roi >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)') : '';
+          const roiStyle = b.roi != null ? (b.roi >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
           html += '<tr><td>' + esc(b.key) + '</td><td>' + (b.bets || 0) + '</td><td>' + (b.win_rate != null ? b.win_rate.toFixed(1) + '%' : '—') + '</td><td style="' + roiStyle + ';font-weight:600">' + (b.roi != null ? b.roi.toFixed(1) + '%' : '—') + '</td></tr>';
         });
         html += '</tbody></table></details>';
@@ -1130,8 +1130,8 @@
         html += '<details style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:600;font-size:var(--font-size-sm)">По времени до матча</summary>';
         html += '<table class="adm-table" style="margin-top:8px"><thead><tr><th>Период</th><th>Ставок</th><th>Win Rate</th><th>ROI</th><th>Ср. кф.</th><th>CLV%</th></tr></thead><tbody>';
         Object.entries(mdata.by_time_to_match).forEach(([key, b]) => {
-          const roiStyle = b.roi != null ? (b.roi >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)') : '';
-          const clvStyle = b.clv_avg_pct != null ? (b.clv_avg_pct >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)') : '';
+          const roiStyle = b.roi != null ? (b.roi >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
+          const clvStyle = b.clv_avg_pct != null ? (b.clv_avg_pct >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
           html += '<tr><td>' + esc(key) + '</td><td>' + (b.bets || 0) + '</td><td>' + (b.win_rate != null ? b.win_rate.toFixed(1) + '%' : '—') + '</td><td style="' + roiStyle + ';font-weight:600">' + (b.roi != null ? b.roi.toFixed(1) + '%' : '—') + '</td><td>' + (b.avg_odd != null ? b.avg_odd.toFixed(2) : '—') + '</td><td style="' + clvStyle + '">' + (b.clv_avg_pct != null ? b.clv_avg_pct.toFixed(2) + '%' : '—') + '</td></tr>';
         });
         html += '</tbody></table></details>';
@@ -1143,34 +1143,34 @@
         html += '<div style="display:grid;gap:8px;margin-top:8px">';
         Object.entries(mdata.shadow_filters).forEach(([filterName, f]) => {
           const label = esc(f.label || filterName);
-          html += '<div style="background:var(--surface-2);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:12px">';
+          html += '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px">';
           html += '<div style="font-weight:600;font-size:var(--font-size-sm);margin-bottom:6px">' + label + '</div>';
           html += '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:var(--font-size-xs)">';
           if (f.bets != null) html += '<span>Ставок: ' + f.bets + '</span>';
           if (f.roi != null) {
-            const c = f.roi >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)';
+            const c = f.roi >= 0 ? 'var(--green)' : 'var(--red)';
             html += '<span style="color:' + c + ';font-weight:600">ROI: ' + (f.roi >= 0 ? '+' : '') + f.roi.toFixed(1) + '%</span>';
           }
           if (f.win_rate != null) html += '<span>WR: ' + f.win_rate.toFixed(1) + '%</span>';
           // Delta metrics
           if (f.delta_roi != null) {
-            const dc = f.delta_roi >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)';
+            const dc = f.delta_roi >= 0 ? 'var(--green)' : 'var(--red)';
             html += '<span style="color:' + dc + '">\u0394ROI: ' + (f.delta_roi >= 0 ? '+' : '') + f.delta_roi.toFixed(1) + 'pp</span>';
           }
           if (f.delta_brier != null) {
-            const dc = f.delta_brier <= 0 ? 'var(--accent-success)' : 'var(--accent-danger)';
+            const dc = f.delta_brier <= 0 ? 'var(--green)' : 'var(--red)';
             html += '<span style="color:' + dc + '">\u0394Brier: ' + (f.delta_brier >= 0 ? '+' : '') + f.delta_brier.toFixed(4) + '</span>';
           }
           if (f.delta_logloss != null) {
-            const dc = f.delta_logloss <= 0 ? 'var(--accent-success)' : 'var(--accent-danger)';
+            const dc = f.delta_logloss <= 0 ? 'var(--green)' : 'var(--red)';
             html += '<span style="color:' + dc + '">\u0394LogLoss: ' + (f.delta_logloss >= 0 ? '+' : '') + f.delta_logloss.toFixed(4) + '</span>';
           }
           if (f.delta_rps != null) {
-            const dc = f.delta_rps <= 0 ? 'var(--accent-success)' : 'var(--accent-danger)';
+            const dc = f.delta_rps <= 0 ? 'var(--green)' : 'var(--red)';
             html += '<span style="color:' + dc + '">\u0394RPS: ' + (f.delta_rps >= 0 ? '+' : '') + f.delta_rps.toFixed(4) + '</span>';
           }
           if (f.delta_clv_avg_pct != null) {
-            const dc = f.delta_clv_avg_pct >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)';
+            const dc = f.delta_clv_avg_pct >= 0 ? 'var(--green)' : 'var(--red)';
             html += '<span style="color:' + dc + '">\u0394CLV: ' + (f.delta_clv_avg_pct >= 0 ? '+' : '') + f.delta_clv_avg_pct.toFixed(2) + '%</span>';
           }
           html += '</div></div>';
@@ -1184,13 +1184,13 @@
 
     if (parts.length) {
       if (data.report && data.report.generated_at) {
-        parts.unshift('<div style="font-size:var(--font-size-xs);color:var(--text-muted);margin-bottom:12px">Сгенерировано: ' + formatDate(data.report.generated_at) + (data.cached ? ' (кэш)' : '') + '</div>');
+        parts.unshift('<div style="font-size:var(--font-size-xs);color:var(--muted);margin-bottom:12px">Сгенерировано: ' + formatDate(data.report.generated_at) + (data.cached ? ' (кэш)' : '') + '</div>');
       }
       cont.innerHTML = parts.join('');
     } else {
       // Fallback for unexpected structure
       const pre = document.createElement('pre');
-      pre.style.cssText = 'white-space:pre-wrap;font-size:var(--font-size-xs);color:var(--text-secondary);max-height:400px;overflow:auto';
+      pre.style.cssText = 'white-space:pre-wrap;font-size:var(--font-size-xs);color:var(--text-2);max-height:400px;overflow:auto';
       pre.textContent = JSON.stringify(data, null, 2);
       cont.textContent = '';
       cont.appendChild(pre);
@@ -1221,10 +1221,10 @@
       '</tr></thead><tbody>';
     data.forEach(r => {
       const roi = r.roi != null ? r.roi.toFixed(1) + '%' : '—';
-      const roiStyle = r.roi != null ? (r.roi >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)') : '';
+      const roiStyle = r.roi != null ? (r.roi >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
       const profit = r.total_profit != null ? r.total_profit : r.profit;
       const profitStr = profit != null ? (profit >= 0 ? '+' : '') + profit.toFixed(2) : '—';
-      const profitStyle = profit != null ? (profit >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)') : '';
+      const profitStyle = profit != null ? (profit >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
       html += '<tr>' +
         '<td>' + esc(r.league || r.league_name || 'ID ' + (r.league_id || '')) + '</td>' +
         '<td>' + (r.days || 90) + 'д</td>' +
@@ -1272,7 +1272,7 @@
       html += '<div style="margin-top:12px"><h4 style="margin:0 0 8px;font-size:var(--font-size-sm)">По диапазонам сигнала</h4>';
       html += '<table class="adm-table"><thead><tr><th>Диапазон</th><th>ROI</th><th>Ставок</th></tr></thead><tbody>';
       data.bins.forEach(b => {
-        const roiStyle = b.roi != null ? (b.roi >= 0 ? 'color:var(--accent-success)' : 'color:var(--accent-danger)') : '';
+        const roiStyle = b.roi != null ? (b.roi >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
         html += '<tr><td>' + esc(b.bin) + '</td><td style="' + roiStyle + ';font-weight:600">' + (b.roi != null ? b.roi.toFixed(1) + '%' : '—') + '</td><td>' + (b.bets || 0) + '</td></tr>';
       });
       html += '</tbody></table></div>';
@@ -1331,7 +1331,7 @@
         '<td>' + dur + '</td>' +
         '<td>' + esc(trigger) + '</td></tr>';
       if (r.error) {
-        html += '<tr><td colspan="5" style="color:var(--accent-danger);font-size:var(--font-size-xs);padding:4px 12px">' + esc(String(r.error).substring(0, 200)) + '</td></tr>';
+        html += '<tr><td colspan="5" style="color:var(--red);font-size:var(--font-size-xs);padding:4px 12px">' + esc(String(r.error).substring(0, 200)) + '</td></tr>';
       }
     });
     html += '</tbody></table>';
@@ -1364,7 +1364,7 @@
     if (status && status.jobs) {
       const running = Object.entries(status.jobs);
       if (running.length) {
-        html = '<div style="margin-bottom:12px;padding:8px 12px;background:rgba(56,189,248,0.1);border-radius:var(--radius-sm);font-size:var(--font-size-sm);color:var(--accent-secondary)">Выполняются: ' + running.map(([k]) => esc(JOB_LABELS[k] || k)).join(', ') + '</div>' + html;
+        html = '<div style="margin-bottom:12px;padding:8px 12px;background:rgba(56,189,248,0.1);border-radius:var(--radius-sm);font-size:var(--font-size-sm);color:var(--blue)">Выполняются: ' + running.map(([k]) => esc(JOB_LABELS[k] || k)).join(', ') + '</div>' + html;
       }
     }
 
@@ -1428,7 +1428,7 @@
 
     html += '</div>';
     if (data.generated_at) {
-      html += '<div style="font-size:var(--font-size-xs);color:var(--text-muted);margin-top:8px">Обновлено: ' + formatDate(data.generated_at) + '</div>';
+      html += '<div style="font-size:var(--font-size-xs);color:var(--muted);margin-top:8px">Обновлено: ' + formatDate(data.generated_at) + '</div>';
     }
     cont.innerHTML = html;
   }
@@ -1472,7 +1472,7 @@
     auditItems.sort((a, b) => new Date(b.ts || 0) - new Date(a.ts || 0));
 
     if (!auditItems.length) {
-      cont.innerHTML = '<div class="adm-loading" style="color:var(--text-muted)">Нет событий аудита. Ручные запуски и ошибки появятся здесь</div>';
+      cont.innerHTML = '<div class="adm-loading" style="color:var(--muted)">Нет событий аудита. Ручные запуски и ошибки появятся здесь</div>';
       return;
     }
 
@@ -1501,7 +1501,7 @@
       const res = await api('/db/browse', { params: { table, limit: 30 } });
       const data = res.data;
       if (!data || !data.rows || !data.rows.length) {
-        cont.innerHTML = '<div class="adm-loading" style="color:var(--text-muted)">Таблица пуста. Загрузите данные через «Синхронизация»</div>';
+        cont.innerHTML = '<div class="adm-loading" style="color:var(--muted)">Таблица пуста. Загрузите данные через «Синхронизация»</div>';
         return;
       }
       const cols = Object.keys(data.rows[0]);
@@ -1509,7 +1509,7 @@
       data.rows.forEach(row => {
         html += '<tr>' + cols.map(c => {
           let val = row[c];
-          if (val === null) return '<td style="color:var(--text-muted)">null</td>';
+          if (val === null) return '<td style="color:var(--muted)">null</td>';
           if (typeof val === 'object') val = JSON.stringify(val);
           const str = String(val);
           return `<td title="${esc(str)}">${esc(str.length > 50 ? str.substring(0, 50) + '...' : str)}</td>`;
@@ -1577,7 +1577,7 @@
 
       if (d.decisions) {
         html += `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">Решения модели</summary>`;
-        html += `<pre style="white-space:pre-wrap;font-size:var(--font-size-xs);color:var(--text-secondary);margin-top:8px;max-height:300px;overflow:auto">${esc(JSON.stringify(d.decisions, null, 2))}</pre></details>`;
+        html += `<pre style="white-space:pre-wrap;font-size:var(--font-size-xs);color:var(--text-2);margin-top:8px;max-height:300px;overflow:auto">${esc(JSON.stringify(d.decisions, null, 2))}</pre></details>`;
       }
 
       body.innerHTML = html;
@@ -1632,7 +1632,7 @@
       modal.classList.remove('hidden');
       el('modal-title').textContent = 'Превью публикации #' + fixtureId;
 
-      let html = '<div style="background:var(--surface-2);padding:16px;border-radius:var(--radius-sm);font-size:var(--font-size-sm);margin-bottom:16px">';
+      let html = '<div style="background:var(--bg-2);padding:16px;border-radius:var(--radius-sm);font-size:var(--font-size-sm);margin-bottom:16px">';
       if (previewRes.data && previewRes.data.html) {
         html += previewRes.data.html;
       } else if (previewRes.data && previewRes.data.text) {
@@ -1672,7 +1672,7 @@
       cont.textContent = 'Нет публикаций для матча #' + fixtureId;
       return;
     }
-    let html = '<div style="font-size:var(--font-size-xs);color:var(--text-muted);margin-bottom:8px">Матч #' + fixtureId + '</div>';
+    let html = '<div style="font-size:var(--font-size-xs);color:var(--muted);margin-bottom:8px">Матч #' + fixtureId + '</div>';
     html += '<table class="adm-table"><thead><tr><th>Дата</th><th>Рынок</th><th>Статус</th><th>Язык</th></tr></thead><tbody>';
     hist.forEach(h => {
       const stCls = h.status === 'ok' ? 'adm-badge-win' : h.status === 'skipped' ? 'adm-badge-pending' : h.status === 'dry_run' ? 'adm-badge-signal' : 'adm-badge-loss';
@@ -1686,7 +1686,7 @@
   function renderGlobalPublishHistory(data) {
     const cont = el('pub-history-list');
     if (!data || !data.length) {
-      cont.innerHTML = '<div class="adm-loading" style="color:var(--text-muted)">Нет публикаций за выбранный период. Попробуйте увеличить диапазон</div>';
+      cont.innerHTML = '<div class="adm-loading" style="color:var(--muted)">Нет публикаций за выбранный период. Попробуйте увеличить диапазон</div>';
       return;
     }
     // All data comes from authenticated admin API (trusted source)
@@ -1696,7 +1696,7 @@
       const stLabel = h.status === 'ok' ? 'OK' : h.status === 'skipped' ? 'Пропущено' : h.status === 'dry_run' ? 'Dry Run' : h.status === 'failed' ? 'Ошибка' : esc(h.status || '—');
       const match = (h.home && h.away) ? esc(h.home) + ' — ' + esc(h.away) : '#' + h.fixture_id;
       const errText = h.error ? esc(String(h.error).substring(0, 100)) : '';
-      html += '<tr><td>' + formatDate(h.created_at) + '</td><td>' + match + '</td><td>' + esc(h.market || '—') + '</td><td>' + esc(h.language || '—') + '</td><td><span class="adm-badge ' + stCls + '">' + stLabel + '</span></td><td style="font-size:var(--font-size-xs);color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(h.error || '') + '">' + errText + '</td></tr>';
+      html += '<tr><td>' + formatDate(h.created_at) + '</td><td>' + match + '</td><td>' + esc(h.market || '—') + '</td><td>' + esc(h.language || '—') + '</td><td><span class="adm-badge ' + stCls + '">' + stLabel + '</span></td><td style="font-size:var(--font-size-xs);color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(h.error || '') + '">' + errText + '</td></tr>';
     });
     html += '</tbody></table>';
     cont.innerHTML = html;

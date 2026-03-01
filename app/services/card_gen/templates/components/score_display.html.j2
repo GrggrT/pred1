@@ -1,0 +1,12 @@
+{# Card Gen v2 — Score display component.
+   Central score for result cards (replaces odds sphere).
+   Context: home_goals (int), away_goals (int)
+#}
+<div class="score-core">
+  <div class="score-shell">
+    <div class="score-inner">
+      <div class="score-value">{{ home_goals }} : {{ away_goals }}</div>
+      <div class="score-label">FINAL SCORE</div>
+    </div>
+  </div>
+</div>

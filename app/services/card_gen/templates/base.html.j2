@@ -1,0 +1,22 @@
+{# Card Gen v2 — Base template.
+   All card types extend this template.
+   Context variables: fonts_css, title_color, home_rgb, away_rgb, card (model)
+#}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    {{ fonts_css }}
+    {% include "themes/" ~ theme_name ~ ".css.j2" %}
+    {% block extra_css %}{% endblock %}
+  </style>
+</head>
+<body>
+  <div class="card{{ ' theme-viral' if theme_name == 'viral' else '' }}{{ ' result-' ~ result_status if result_status is defined and result_status else '' }}"
+       style="width: {{ width }}px;"
+       data-palette-ready="1">
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

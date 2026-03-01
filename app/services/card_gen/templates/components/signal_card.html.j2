@@ -1,0 +1,27 @@
+{# Card Gen v2 — Signal card component.
+   Renders the top-left signal/value indicators card.
+   Context: signal_rows (list[str] — may contain HTML), signal_title_display (str),
+            signal_title_font_size (int), kicker_label (str), card_title (str)
+#}
+<div class="signal-card">
+  {% if signal_rows %}
+  {# Mode: value indicator metrics #}
+  <div class="signal-metrics">
+    <div class="signal-header-row">
+      <div class="signal-metrics-title" style="font-size:{{ signal_title_font_size }}px">{{ signal_title_display }}</div>
+      <div class="signal-kicker"><span class="kicker-dot"></span>{{ kicker_label }}</div>
+    </div>
+    {% for line in signal_rows %}
+    <div class="signal-metric-line">{{ line|safe }}</div>
+    {% endfor %}
+  </div>
+  {% else %}
+  {# Fallback mode: large title #}
+  <div class="signal-fallback">
+    <div class="signal-header-row">
+      <h1 class="signal-title">{{ card_title }}</h1>
+      <div class="signal-kicker"><span class="kicker-dot"></span>{{ kicker_label }}</div>
+    </div>
+  </div>
+  {% endif %}
+</div>

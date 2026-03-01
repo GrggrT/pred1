@@ -1,0 +1,19 @@
+{# Card Gen v2 — Chance bar component.
+   1/X/2 probability bar with percentage labels.
+   Context: has_chance (bool), home_pct (int), draw_pct (int), away_pct (int),
+            home_share (float), draw_share (float), away_share (float)
+#}
+{% if has_chance %}
+<div class="chance-wrap">
+  <div class="chance-labels">
+    <div class="chance-label home"><span class="chance-val">{{ home_pct }}%</span></div>
+    <div class="chance-label draw"><span class="chance-val">{{ draw_pct }}%</span></div>
+    <div class="chance-label away"><span class="chance-val">{{ away_pct }}%</span></div>
+  </div>
+  <div class="chance-bar">
+    <div class="chance-seg home" style="width:{{ '%.3f'|format(home_share * 100) }}%"></div>
+    <div class="chance-seg draw" style="width:{{ '%.3f'|format(draw_share * 100) }}%"></div>
+    <div class="chance-seg away" style="width:{{ '%.3f'|format(away_share * 100) }}%"></div>
+  </div>
+</div>
+{% endif %}

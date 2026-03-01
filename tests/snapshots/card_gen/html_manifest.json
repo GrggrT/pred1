@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "pred_en_hot_basic",
+      "file": "pred_en_hot_basic.html",
+      "sha256": "23396710a1a6177465c049a72353e53089576e835b9010f152b8eca4dc66ba6e",
+      "bytes": 1550817
+    },
+    {
+      "id": "pred_en_top_long_names",
+      "file": "pred_en_top_long_names.html",
+      "sha256": "c48e79ec893d950b2e847ed4e7faf9d58109e91ffcc7c4d73516b905a8a01ffb",
+      "bytes": 1550778
+    },
+    {
+      "id": "pred_ru_top_layout",
+      "file": "pred_ru_top_layout.html",
+      "sha256": "ddcb3609cd669b6c9f7b39eaf22bc302de259fbcd075f85325126a63c198d35b",
+      "bytes": 1550844
+    },
+    {
+      "id": "pred_en_extreme_odds",
+      "file": "pred_en_extreme_odds.html",
+      "sha256": "dd802ca5a8026c988173e7341dc1793fed308d8ccb8d7dc0297d3d109ec46801",
+      "bytes": 1550670
+    },
+    {
+      "id": "pred_en_no_form",
+      "file": "pred_en_no_form.html",
+      "sha256": "e303a48992dd2cd0967a580c37870bbeb1dbe1ea1f17bee33c53affb4c35775a",
+      "bytes": 1550206
+    },
+    {
+      "id": "pred_en_viral_theme",
+      "file": "pred_en_viral_theme.html",
+      "sha256": "8d5690663d607d3b6c34b55417eae5ebf395e8414e05c0269991721ff5a4b1fa",
+      "bytes": 1553313
+    },
+    {
+      "id": "pred_de_long_venue",
+      "file": "pred_de_long_venue.html",
+      "sha256": "2ce61feaa05a335750875cb5c1b31d82f2fc7cef64ba88594c1b358b5503b8db",
+      "bytes": 1550840
+    },
+    {
+      "id": "pred_sparse_inputs",
+      "file": "pred_sparse_inputs.html",
+      "sha256": "58a2ba8b10ec2a8f4f2110298489065993e178f2b9bb9348317fe729a2cd1e06",
+      "bytes": 1550132
+    },
+    {
+      "id": "result_win",
+      "file": "result_win.html",
+      "sha256": "00b80fdd8d2e702533bedf31bc2410695be5ebefc5a09022c0f06ad962dc1a91",
+      "bytes": 1550093
+    },
+    {
+      "id": "result_loss",
+      "file": "result_loss.html",
+      "sha256": "1da4f2e4fe26a0699bb46990caf87f5612984d65d30d4a81af6ba03d14298d5a",
+      "bytes": 1550109
+    }
+  ]
+}

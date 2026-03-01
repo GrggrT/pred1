@@ -1,0 +1,7 @@
+{# Card Gen v2 — Venue line component.
+   Stadium name + city, rendered only if venue_label is non-empty.
+   Context: venue_label (str — e.g. "Emirates Stadium • London")
+#}
+{% if venue_label %}
+<div class="venue-row">{{ venue_label }}</div>
+{% endif %}

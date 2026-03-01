@@ -1,0 +1,10 @@
+{# Card Gen v2 — Team badge component.
+   Renders logo shell + team name for one side.
+   Context: side ("home"|"away"), logo_uri (str), team_name (str), team_font_size (int)
+#}
+<div class="team">
+  <div class="logo-shell {{ side }}">
+    <img class="team-logo {{ side }}-logo" src="{{ logo_uri }}" alt="{{ side }} logo" />
+  </div>
+  <p class="team-name" style="font-size:{{ team_font_size }}px">{{ team_name }}</p>
+</div>

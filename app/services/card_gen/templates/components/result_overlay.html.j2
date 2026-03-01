@@ -1,0 +1,12 @@
+{# Card Gen v2 — Result badge component.
+   Shows outcome status, profit, and original pick (replaces prediction_badge).
+   Context: result_status ("win"|"loss"), result_main_text (str),
+            original_pick_display (str|None), disclaimer (str)
+#}
+<section class="result-section {{ result_status }}">
+  <div class="result-main {{ result_status }}">{{ result_main_text }}</div>
+  {% if original_pick_display %}
+  <div class="result-pick-info">{{ original_pick_display }}</div>
+  {% endif %}
+  <div class="result-disclaimer">{{ disclaimer }}</div>
+</section>

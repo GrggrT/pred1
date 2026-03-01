@@ -1,0 +1,17 @@
+{# Card Gen v2 — Form dots component.
+   Renders W/D/L colored tokens for a team's form string.
+   Context: form (str — e.g. "WWDLW", already normalized, max 8 chars)
+#}
+{% if form %}
+  {% for ch in form %}
+    {% if ch == 'W' %}
+    <span class="form-token form-win">W</span>
+    {% elif ch == 'D' %}
+    <span class="form-token form-draw">D</span>
+    {% elif ch == 'L' %}
+    <span class="form-token form-loss">L</span>
+    {% endif %}
+  {% endfor %}
+{% else %}
+  <span class="form-empty">NO FORM</span>
+{% endif %}
