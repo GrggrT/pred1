@@ -1,9 +1,9 @@
 # Текущее состояние проекта
 
-**Последнее обновление**: 2026-02-23
-**Текущая фаза**: Все фазы 1-4 завершены, Tasks 10-18 завершены
-**Текущая задача**: Мониторинг production, ожидание 50+ settled stacking predictions
-**Блокеры**: Нет (ожидание данных)
+**Последнее обновление**: 2026-03-01
+**Текущая фаза**: Все фазы 1-4 завершены, Tasks 10-20 завершены
+**Текущая задача**: Task 20 завершён — post-monitoring config applied
+**Блокеры**: Нет
 
 ## Архитектура prediction pipeline (после Task 15)
 
@@ -25,6 +25,19 @@ DC fit (goals + xG) → Poisson baseline → Stacking meta-model → optional Di
 - Max 1 bet per fixture из "goals" group (best EV)
 - Kelly fraction для всех рынков (в decision_payload)
 
+## Production Metrics (report #001, 2026-03-01)
+
+**Стэкинг (27 settled)**:
+- RPS: 0.1493 (backtest: 0.196) ✅
+- ROI: +32.8% (variance-inflated, n=27)
+- Stacking vs DC-only: -7.7% RPS ✅
+- Calibration error: 0.073 (> 0.05, Kelly NOT activated)
+
+**Active markets**: 1X2, TOTAL 2.5, Double Chance
+**Disabled markets**: TOTAL 1.5, TOTAL 3.5, BTTS
+**Odds range**: 1.30 — 2.50
+**Next checkpoint**: 100+ stacking settled predictions
+
 ## Прогресс по фазам
 
 ### Фаза 1: Dixon-Coles ядро + hotfixes
@@ -42,7 +55,7 @@ DC fit (goals + xG) → Poisson baseline → Stacking meta-model → optional Di
 ### Фаза 4: Инфраструктурная зрелость
 - [x] 4.1-4.5 Dependencies, tests, Docker, CI, dedup
 
-### Task 10-18
+### Task 10-20
 - [x] Task 10: Training data pipeline (7308 examples)
 - [x] Task 11: Ablation stacking + Dirichlet evaluation
 - [x] Task 12: DC-xG integration (quasi-Poisson, rho=0)
@@ -52,6 +65,8 @@ DC fit (goals + xG) → Poisson baseline → Stacking meta-model → optional Di
 - [x] Task 16: Diagnostics — VOID=SKIP (нормально), DC-xG params fixed
 - [x] Task 17: Новые рынки — TOTAL 1.5/3.5, BTTS, Double Chance
 - [x] Task 18: Backlog cleanup — 7 items resolved, rho grid expanded, dashboard bug fixed
+- [x] Task 19: Production monitoring — report #001, SQL analysis, recommendations
+- [x] Task 20: Post-monitoring config — markets reduced, odds range narrowed, docs updated
 
 ## Ключевые метрики
 | Метрика | Значение |
@@ -62,6 +77,9 @@ DC fit (goals + xG) → Poisson baseline → Stacking meta-model → optional Di
 | Ablation ΔRPS (Stacking vs Baseline) | -7.0% |
 | Stacking v2 val RPS | 0.1887 (13 features) |
 | Training data v2 | 7308 examples, 6183 with DC-xG |
+| Production settled (all markets) | 304 |
+| Production ROI (all markets) | -8.9% |
+| Production calibration error (stacking monitor) | 0.0732 |
 
 ## Активные feature flags (production defaults)
 - `DC_USE_XG=true` — dual-mode DC fit (goals + xG)
@@ -70,9 +88,9 @@ DC fit (goals + xG) → Poisson baseline → Stacking meta-model → optional Di
 - `ENABLE_KELLY=false` — ожидает 200+ settled
 - `USE_DIRICHLET_CALIB=false` — marginal post-stacking (D021)
 - `ENABLE_TOTAL_BETS=true` — Task 18 fix
-- `ENABLE_TOTAL_1_5_BETS=true` — Task 17
-- `ENABLE_TOTAL_3_5_BETS=true` — Task 17
-- `ENABLE_BTTS_BETS=true` — Task 17
+- `ENABLE_TOTAL_1_5_BETS=false` — Task 20 (disabled after production report #001)
+- `ENABLE_TOTAL_3_5_BETS=false` — Task 20 (disabled after production report #001)
+- `ENABLE_BTTS_BETS=false` — Task 20 (disabled after production report #001)
 - `ENABLE_DOUBLE_CHANCE_BETS=true` — Task 17
 
 ## Открытые задачи (BACKLOG)

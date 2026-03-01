@@ -25,9 +25,28 @@ Lead просматривает этот файл и решает, что при
 
 [2026-02-22] [low] — Market columns hardcoded в 40+ местах по 6 файлам (sync_data, build_predictions, evaluate_results, quality_report, main.py, publishing). Нет централизованного markets.py. Добавление нового рынка требует правок в 15+ паттернах. Кандидат на рефакторинг при добавлении следующего рынка.
 
+## === Post-Task 20 (post-monitoring config) — 2026-03-01 ===
+
+[2026-03-01] [high] — Stacking обучен только на 1X2 features. Secondary markets
+(TOTAL, BTTS, DC) используют Poisson probs без мета-модели. Для реактивации
+BTTS/TOTAL_1_5/3_5 нужен: (a) отдельный стэкинг для binary markets, или
+(b) Dirichlet calibration для Poisson-based probs, или (c) COM-Poisson для
+лучшего goal distribution modeling.
+
+[2026-03-01] [medium] — 243 из 304 settled имеют prob_source=unknown (legacy).
+Эти predictions не используют DC/стэкинг и загрязняют метрики. Рассмотреть:
+фильтрацию legacy predictions из отчётов, или маркировку prob_source при
+settlement для ретроспективного анализа.
+
+[2026-03-01] [medium] — CLV = 0.00% на 45 predictions с closing odds.
+Нейтральный CLV = модель не бьёт рынок. Возможные причины: (a) timing —
+predictions слишком близко к kickoff, closing line ≈ opening line,
+(b) рынок эффективен для этих матчей. Исследовать: CLV vs time-to-kickoff.
+
 ## === Pre-Task 17 ===
 
-[2026-02-22] [medium] — SKIP rate 80%: 18/46 stacking SKIPs из-за odds_out_of_range. 8 из них имели EV > 0. Рассмотреть расширение MIN_ODD=1.30 (текущий 1.50) для сильных фаворитов, и MAX_ODD=4.00 (текущий 3.20) для ничьих. Мониторить ROI по odds buckets после 50+ settled.
+~~[2026-02-22] [medium] — SKIP rate 80%~~ **RESOLVED** (Task 16 + config changes):
+MIN_ODD=1.30, MAX_ODD=2.50, VALUE_THRESHOLD=0.07.
 
 [2026-02-22] [low] — EPL/Ligue1 EV threshold override 0.12 — агрессивный. Отсекает ~12 predictions с EV 0.03-0.12. Рассмотреть снижение до 0.08 после подтверждения calibration quality на 50+ settled.
 

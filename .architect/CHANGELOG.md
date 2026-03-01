@@ -4,6 +4,67 @@
 
 ---
 
+## 2026-03-01 — Post-monitoring configuration update (Task 20)
+
+### 1. Runtime config hardening (.env)
+- **Рынки отключены**: `ENABLE_TOTAL_1_5_BETS=false`, `ENABLE_TOTAL_3_5_BETS=false`, `ENABLE_BTTS_BETS=false`
+- **Рынки оставлены**: `ENABLE_TOTAL_BETS=true`, `ENABLE_DOUBLE_CHANCE_BETS=true`
+- **Odds range**: `MIN_ODD=1.30`, `MAX_ODD=2.50` (было 4.00)
+- **Risk controls**: `VALUE_THRESHOLD=0.07`, `USE_STACKING=true`, `DC_USE_XG=true`, `ENABLE_KELLY=false`
+
+### 2. Recommended defaults (.env.example)
+- Обновлены defaults для post-monitoring этапа:
+  - `ENABLE_TOTAL_1_5_BETS=false`
+  - `ENABLE_TOTAL_3_5_BETS=false`
+  - `ENABLE_BTTS_BETS=false`
+  - `ENABLE_DOUBLE_CHANCE_BETS=true`
+  - `MAX_ODD=2.50`
+
+### 3. Operational step
+- Выполнен `docker compose restart app scheduler`
+- Так как restart не применил новые env значения для уже созданных контейнеров, выполнен `docker compose up -d --force-recreate app scheduler`
+- Выполнена runtime-проверка settings (рынки + MAX_ODD)
+
+### 4. Documentation updates
+- **DECISIONS**: добавлен `D030` (отключение убыточных рынков и longshots)
+- **STATE**: добавлена секция `Production Metrics (report #001, 2026-03-01)` и обновлён статус до Task 20
+- **BACKLOG**: добавлены новые post-monitoring пункты; SKIP-rate пункт закрыт как resolved
+- **SESSION_LOG**: добавлена сессия 20
+
+---
+
+## 2026-03-01 — Production monitoring: first report (Task 19)
+
+### 1. Production monitor run
+- **Команда**: `docker compose exec scheduler python scripts/production_monitor.py --min-settled 10 --detailed`
+- **Результат**:
+  - 27 settled stacking predictions
+  - RPS (stacking)=0.1493, RPS (DC-only)=0.1617, RPS (Poisson)=0.1596
+  - Calibration error=0.0732
+  - ROI=+32.8%, total_profit=+8.85
+  - Mean CLV=+0.0000 (27)
+  - Recommendation скрипта: DO NOT activate Kelly
+
+### 2. Manual SQL production analytics (2.1–2.8)
+- **Источник**: Postgres `fc_mvp`, таблицы `predictions` + `predictions_totals`
+- **Адаптации схемы**: `WIN/LOSS` (вместо WON/LOST), `selection_code` и `initial_odd` для `predictions`
+- **Итоговые метрики**:
+  - Total settled=304, win rate=44.7%, total profit=-27.05, ROI=-8.9%
+  - Market ROI: 1X2 +9.9%, TOTAL -4.1%, BTTS -16.4%, TOTAL_3_5 -32.0%, TOTAL_1_5 -53.6%, DOUBLE_CHANCE -9.3%
+  - CLV (1X2): 45 наблюдений, avg_clv_pct=0.00
+
+### 3. Reporting artifacts
+- **Добавлен**: `results/production_report_001.md`
+  - Полные таблицы Overall/Markets/Leagues/Prob source/Odds buckets/Calibration/CLV/Temporal trend
+  - Полный вывод `production_monitor.py`
+  - Рекомендации по порогам из `MONITORING_CHECKLIST.md`
+
+### 4. Architecture state updates
+- **Обновлены**: `.architect/STATE.md`, `.architect/SESSION_LOG.md`, `.architect/CHANGELOG.md`
+- **Статус**: Production Report #001 завершён; Kelly остаётся выключенным
+
+---
+
 ## 2026-02-23 — Backlog cleanup: critical + high items (Task 18)
 
 ### 1.1 [CRITICAL] ENABLE_TOTAL_BETS=True

@@ -4,6 +4,52 @@
 
 ---
 
+## Сессия 20 — 2026-03-01
+**Задание**: Task 20 — Post-monitoring конфигурация
+**Выполнено**:
+1. Обновлён runtime config в `.env`:
+   - Отключены рынки: `ENABLE_TOTAL_1_5_BETS=false`, `ENABLE_TOTAL_3_5_BETS=false`, `ENABLE_BTTS_BETS=false`
+   - Оставлены активными: `ENABLE_TOTAL_BETS=true`, `ENABLE_DOUBLE_CHANCE_BETS=true`
+   - Odds range сужен: `MAX_ODD=2.50` (при `MIN_ODD=1.30`), `VALUE_THRESHOLD=0.07`, `ENABLE_KELLY=false`
+2. Обновлены рекомендуемые defaults в `.env.example` с теми же market toggles и `MAX_ODD=2.50`.
+3. Выполнен `docker compose restart app scheduler`; затем `docker compose up -d --force-recreate app scheduler`, т.к. обычный restart не перечитал обновлённый `.env`. После этого выполнена runtime-проверка через `app.core.config.settings`.
+4. Обновлена архитектурная документация:
+   - `DECISIONS.md`: добавлено решение `D030` (отключение убыточных рынков + сужение odds)
+   - `STATE.md`: добавлена секция `Production Metrics (report #001, 2026-03-01)`, обновлён статус до Task 20
+   - `BACKLOG.md`: добавлены 3 post-monitoring пункта, закрыт пункт про SKIP rate
+   - `CHANGELOG.md`: добавлена запись Task 20
+
+**Результат**: Конфигурация production ужесточена после отчёта #001; активные рынки сокращены до 1X2/TOTAL 2.5/DC, longshots >2.50 отключены
+**Следующий шаг**: Повторный checkpoint при 100+ stacking settled predictions
+
+---
+
+## Сессия 19 — 2026-03-01
+**Задание**: Task 19 — Production monitoring, первый отчёт
+**Выполнено**:
+1. Запущен `scripts/production_monitor.py --min-settled 10 --detailed` в `scheduler`, получен полный вывод:
+   - 27 settled stacking predictions
+   - RPS=0.1493, Brier=0.1827, LogLoss=0.5515
+   - Calibration error=0.0732
+   - ROI=+32.8% (stacking subset), CLV=+0.0000
+2. Выполнен ручной SQL-анализ 2.1–2.8 по всем рынкам (с адаптацией под текущую схему: `WIN/LOSS`, `selection_code`, `initial_odd`):
+   - Total settled=304, overall ROI=-8.9%, profit=-27.05
+   - По рынкам: 1X2 +9.9%, TOTAL -4.1%, BTTS -16.4%, TOTAL_3_5 -32.0%, TOTAL_1_5 -53.6%, DOUBLE_CHANCE -9.3%
+   - По лигам: лидеры Ligue 1 (+15.1%), Bundesliga (+11.2%); аутсайдеры Primeira Liga (-44.1%), La Liga (-24.3%)
+   - CLV (1X2): 45 ставок с закрывающими odds, avg_clv_pct=0.00
+3. Создан отчёт `results/production_report_001.md`:
+   - Полные таблицы 2.1–2.8
+   - Полный вывод production_monitor
+   - Рекомендации по чеклисту (Kelly/ROI/CLV/рынки/next actions)
+4. Обновлены архитектурные артефакты:
+   - `.architect/STATE.md` — production snapshot #001
+   - `.architect/CHANGELOG.md` — запись о Task 19
+
+**Результат**: First production report готов, решение: **Kelly не активировать** (calibration error > 0.05), требуется корректировка market mix и фильтров value/odds
+**Следующий шаг**: Принять решение Lead по временной деактивации слабых рынков и повторить мониторинг после 450+ settled
+
+---
+
 ## Сессия 18 — 2026-02-23
 **Задание**: Task 18 — Backlog cleanup: critical + high items
 **Выполнено**:
