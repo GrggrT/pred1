@@ -26,9 +26,22 @@ def _expected_score(
     return D(1) / (D(1) + (D(10) ** safe_div(opponent_rating - rating - adj, D(400))))
 
 
-def _goal_diff_multiplier(home_goals: int, away_goals: int) -> Decimal:
-    """K-factor multiplier based on goal difference: max(1, ln(|diff| + 1))."""
-    diff = abs(home_goals - away_goals)
+def _goal_diff_multiplier(
+    home_goals: int,
+    away_goals: int,
+    home_xg: float | None = None,
+    away_xg: float | None = None,
+    use_xg: bool = False,
+) -> Decimal:
+    """K-factor multiplier based on goal (or xG) difference: max(1, ln(|diff| + 1)).
+
+    When use_xg=True and xG data is available, uses xG difference instead of
+    actual goal difference.  This reduces variance from lucky/unlucky goals.
+    """
+    if use_xg and home_xg is not None and away_xg is not None:
+        diff = abs(home_xg - away_xg)
+    else:
+        diff = abs(home_goals - away_goals)
     if diff <= 1:
         return D(1)
     return D(str(round(math.log(diff + 1), 6)))
@@ -177,6 +190,7 @@ async def apply_elo_from_fixtures(
     ha = _settings.elo_home_advantage if home_advantage == 65 else home_advantage
     k = _settings.elo_k_factor if k_factor == 20 else k_factor
     reg = _settings.elo_regression_factor if regression_factor == D("0.67") else regression_factor
+    use_xg = _settings.elo_use_xg_diff
 
     league_filter = ""
     cutoff_filter = ""
@@ -257,7 +271,8 @@ async def apply_elo_from_fixtures(
         res = await session.execute(
             text(
                 f"""
-                SELECT id, kickoff, home_team_id, away_team_id, home_goals, away_goals
+                SELECT id, kickoff, home_team_id, away_team_id, home_goals, away_goals,
+                       home_xg, away_xg
                 FROM fixtures
                 WHERE status IN ('FT','AET','PEN')
                   AND home_goals IS NOT NULL AND away_goals IS NOT NULL
@@ -313,8 +328,13 @@ async def apply_elo_from_fixtures(
             home_rating = ratings.get(home_id, DEFAULT_RATING)
             away_rating = ratings.get(away_id, DEFAULT_RATING)
 
-            # Goal-diff multiplier
-            gdm = _goal_diff_multiplier(int(row.home_goals), int(row.away_goals))
+            # Goal-diff multiplier (optionally xG-based)
+            home_xg = float(row.home_xg) if row.home_xg is not None else None
+            away_xg = float(row.away_xg) if row.away_xg is not None else None
+            gdm = _goal_diff_multiplier(
+                int(row.home_goals), int(row.away_goals),
+                home_xg=home_xg, away_xg=away_xg, use_xg=use_xg,
+            )
             k_eff = q_money(k_dec * gdm)
 
             expected_home = _expected_score(home_rating, away_rating, is_home=True, home_advantage=ha)

@@ -63,6 +63,7 @@ class BetRow:
     status: str
     profit: Decimal
     closing_odd: Decimal | None
+    opening_odd: Decimal | None = None
     feature_flags: dict | None = None
     home_goals: int | None = None
     away_goals: int | None = None
@@ -109,11 +110,21 @@ def _safe_prob(prob: Decimal) -> float:
 
 
 def _clv_pct(closing_odd: Decimal | None, initial_odd: Decimal | None) -> float:
+    """CLV = (initial / closing) - 1.  Positive = got better price than closing."""
     if closing_odd is None or initial_odd is None:
         return 0.0
-    if initial_odd == 0:
+    if initial_odd == 0 or closing_odd == 0:
         return 0.0
-    return float((Decimal(closing_odd) / Decimal(initial_odd)) - Decimal(1)) * 100
+    return float((Decimal(initial_odd) / Decimal(closing_odd)) - Decimal(1)) * 100
+
+
+def _market_clv_pct(opening_odd: Decimal | None, closing_odd: Decimal | None) -> float:
+    """Market CLV = (opening / closing) - 1.  Positive = line shortened (market agrees)."""
+    if opening_odd is None or closing_odd is None:
+        return 0.0
+    if opening_odd == 0 or closing_odd == 0:
+        return 0.0
+    return float((Decimal(opening_odd) / Decimal(closing_odd)) - Decimal(1)) * 100
 
 
 async def get_cached(session: AsyncSession) -> dict | None:
@@ -161,6 +172,12 @@ def _summarize(rows: list[BetRow]) -> dict:
     )
     clv_cov = len(clv_rows)
     clv_cov_pct = clv_cov / total * 100 if total else 0.0
+    # Market CLV: opening vs closing line movement
+    mclv_rows = [r for r in rows if r.opening_odd is not None and r.closing_odd is not None]
+    mclv_avg = (
+        sum(_market_clv_pct(r.opening_odd, r.closing_odd) for r in mclv_rows) / len(mclv_rows)
+        if mclv_rows else 0.0
+    )
     return {
         "bets": total,
         "win_rate": wins / total * 100 if total else 0.0,
@@ -169,6 +186,8 @@ def _summarize(rows: list[BetRow]) -> dict:
         "clv_avg_pct": clv_avg,
         "clv_cov": clv_cov,
         "clv_cov_pct": clv_cov_pct,
+        "market_clv_avg_pct": mclv_avg,
+        "market_clv_cov": len(mclv_rows),
     }
 
 
@@ -343,7 +362,10 @@ async def _fetch_1x2(session: AsyncSession) -> list[BetRow]:
               p.feature_flags AS feature_flags,
               o.home_win AS close_home,
               o.draw AS close_draw,
-              o.away_win AS close_away
+              o.away_win AS close_away,
+              op.home_win AS open_home,
+              op.draw AS open_draw,
+              op.away_win AS open_away
             FROM predictions p
             JOIN fixtures f ON f.id=p.fixture_id
             LEFT JOIN leagues l ON l.id=f.league_id
@@ -356,6 +378,14 @@ async def _fetch_1x2(session: AsyncSession) -> list[BetRow]:
               ORDER BY os.fetched_at DESC
               LIMIT 1
             ) o ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT home_win, draw, away_win
+              FROM odds_snapshots os
+              WHERE os.fixture_id=f.id
+                AND os.bookmaker_id=:bid
+              ORDER BY os.fetched_at ASC
+              LIMIT 1
+            ) op ON TRUE
             WHERE p.selection_code IN ('HOME_WIN','DRAW','AWAY_WIN')
               AND p.status IN ('WIN','LOSS')
               AND p.initial_odd IS NOT NULL
@@ -369,10 +399,13 @@ async def _fetch_1x2(session: AsyncSession) -> list[BetRow]:
     for r in res.fetchall():
         if r.selection == "HOME_WIN":
             closing = r.close_home
+            opening = r.open_home
         elif r.selection == "DRAW":
             closing = r.close_draw
+            opening = r.open_draw
         else:
             closing = r.close_away
+            opening = r.open_away
         ff = r.feature_flags if isinstance(r.feature_flags, dict) else None
         rows.append(
             BetRow(
@@ -387,6 +420,7 @@ async def _fetch_1x2(session: AsyncSession) -> list[BetRow]:
                 status=r.status,
                 profit=Decimal(r.profit) if r.profit is not None else Decimal(0),
                 closing_odd=Decimal(closing) if closing is not None else None,
+                opening_odd=Decimal(opening) if opening is not None else None,
                 feature_flags=ff,
                 home_goals=r.home_goals,
                 away_goals=r.away_goals,
@@ -421,7 +455,18 @@ async def _fetch_totals(session: AsyncSession) -> list[BetRow]:
               o.btts_no AS close_btts_no,
               o.dc_1x AS close_dc_1x,
               o.dc_x2 AS close_dc_x2,
-              o.dc_12 AS close_dc_12
+              o.dc_12 AS close_dc_12,
+              op.over_2_5 AS open_over,
+              op.under_2_5 AS open_under,
+              op.over_1_5 AS open_over_1_5,
+              op.under_1_5 AS open_under_1_5,
+              op.over_3_5 AS open_over_3_5,
+              op.under_3_5 AS open_under_3_5,
+              op.btts_yes AS open_btts_yes,
+              op.btts_no AS open_btts_no,
+              op.dc_1x AS open_dc_1x,
+              op.dc_x2 AS open_dc_x2,
+              op.dc_12 AS open_dc_12
             FROM predictions_totals pt
             JOIN fixtures f ON f.id=pt.fixture_id
             LEFT JOIN leagues l ON l.id=f.league_id
@@ -437,6 +482,17 @@ async def _fetch_totals(session: AsyncSession) -> list[BetRow]:
               ORDER BY os.fetched_at DESC
               LIMIT 1
             ) o ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT over_2_5, under_2_5,
+                     over_1_5, under_1_5, over_3_5, under_3_5,
+                     btts_yes, btts_no,
+                     dc_1x, dc_x2, dc_12
+              FROM odds_snapshots os
+              WHERE os.fixture_id=f.id
+                AND os.bookmaker_id=:bid
+              ORDER BY os.fetched_at ASC
+              LIMIT 1
+            ) op ON TRUE
             WHERE pt.status IN ('WIN','LOSS')
               AND pt.initial_odd IS NOT NULL
               AND pt.settled_at >= :epoch
@@ -452,10 +508,19 @@ async def _fetch_totals(session: AsyncSession) -> list[BetRow]:
         "BTTS_YES": "close_btts_yes", "BTTS_NO": "close_btts_no",
         "DC_1X": "close_dc_1x", "DC_X2": "close_dc_x2", "DC_12": "close_dc_12",
     }
+    _opening_map = {
+        "OVER_2_5": "open_over", "UNDER_2_5": "open_under",
+        "OVER_1_5": "open_over_1_5", "UNDER_1_5": "open_under_1_5",
+        "OVER_3_5": "open_over_3_5", "UNDER_3_5": "open_under_3_5",
+        "BTTS_YES": "open_btts_yes", "BTTS_NO": "open_btts_no",
+        "DC_1X": "open_dc_1x", "DC_X2": "open_dc_x2", "DC_12": "open_dc_12",
+    }
     rows: list[BetRow] = []
     for r in res.fetchall():
         col = _closing_map.get(r.selection)
         closing = getattr(r, col, None) if col else None
+        ocol = _opening_map.get(r.selection)
+        opening = getattr(r, ocol, None) if ocol else None
         rows.append(
             BetRow(
                 fixture_id=int(r.fixture_id),
@@ -469,6 +534,7 @@ async def _fetch_totals(session: AsyncSession) -> list[BetRow]:
                 status=r.status,
                 profit=Decimal(r.profit) if r.profit is not None else Decimal(0),
                 closing_odd=Decimal(closing) if closing is not None else None,
+                opening_odd=Decimal(opening) if opening is not None else None,
                 market=r.market,
             )
         )

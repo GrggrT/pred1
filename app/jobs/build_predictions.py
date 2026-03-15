@@ -15,7 +15,7 @@ from app.core.timeutils import utcnow
 from app.services.poisson import match_probs, match_probs_dixon_coles, poisson_pmf
 from app.services.elo_ratings import apply_elo_from_fixtures, get_team_rating, DEFAULT_RATING
 from app.services.league_model_params import estimate_dixon_coles_rho
-from app.services.odds_utils import remove_overround_basic, remove_overround_binary
+from app.services.odds_utils import remove_overround_basic, remove_overround_binary, remove_overround_shin
 from app.services.dixon_coles import predict_lambda_mu as dc_predict_lambda_mu
 from app.services.stacking import load_stacking_model
 from app.services.calibration import load_calibrator
@@ -303,6 +303,8 @@ async def _target_rows(session: AsyncSession):
                    mi.home_venue_for, mi.home_venue_against,
                    mi.away_venue_for, mi.away_venue_against,
                    mi.home_rest_hours, mi.away_rest_hours,
+                   mi.home_xg_l5, mi.home_xg_l10,
+                   mi.away_xg_l5, mi.away_xg_l10,
                    o.home_win, o.draw, o.away_win,
                    o.over_2_5, o.under_2_5,
                    o.over_1_5, o.under_1_5, o.over_3_5, o.under_3_5,
@@ -370,6 +372,40 @@ async def _history_values(session: AsyncSession, team_id: int, cutoff: datetime,
         },
     )
     return [D(r.val) for r in res.fetchall() if r.val is not None]
+
+
+async def _h2h_stats(
+    session: AsyncSession,
+    team_a: int,
+    team_b: int,
+    before: datetime,
+    limit: int = 10,
+) -> tuple[float, float]:
+    """Return (draw_rate, goals_avg) from last `limit` H2H meetings before `before`."""
+    res = await session.execute(
+        text(
+            """
+            SELECT home_goals, away_goals
+            FROM fixtures
+            WHERE status IN ('FT', 'AET', 'PEN')
+              AND home_goals IS NOT NULL AND away_goals IS NOT NULL
+              AND (
+                (home_team_id = :ta AND away_team_id = :tb) OR
+                (home_team_id = :tb AND away_team_id = :ta)
+              )
+              AND kickoff < :before
+            ORDER BY kickoff DESC
+            LIMIT :lim
+            """
+        ),
+        {"ta": team_a, "tb": team_b, "before": before, "lim": limit},
+    )
+    rows = res.fetchall()
+    if not rows:
+        return 0.0, 0.0
+    draws = sum(1 for r in rows if int(r.home_goals) == int(r.away_goals))
+    total_goals = sum(int(r.home_goals) + int(r.away_goals) for r in rows)
+    return draws / len(rows), total_goals / len(rows)
 
 
 async def _prefetch_team_values(
@@ -792,24 +828,6 @@ async def run(session: AsyncSession):
     elo_cutoff = utcnow() if settings.backtest_mode else None
     await apply_elo_from_fixtures(session, league_ids=settings.league_ids, cutoff=elo_cutoff)
 
-    # Load stacking meta-model (primary prediction path)
-    stacking_model = None
-    if settings.use_stacking:
-        stacking_model = await load_stacking_model(session)
-        if stacking_model is not None:
-            log.info("build_predictions stacking model loaded (%d features)", len(stacking_model.feature_names))
-        else:
-            log.warning("build_predictions USE_STACKING=true but no trained model found; using DC-only fallback")
-
-    # Load Dirichlet calibrator if enabled
-    dirichlet_calibrator = None
-    if settings.use_dirichlet_calib:
-        dirichlet_calibrator = await load_calibrator(session)
-        if dirichlet_calibrator is not None:
-            log.info("build_predictions Dirichlet calibrator loaded")
-        else:
-            log.warning("build_predictions USE_DIRICHLET_CALIB=true but no trained calibrator found")
-
     # Log per-league controls
     league_1x2_list = settings.league_1x2_enabled
     league_ev_overrides = settings.league_ev_threshold_overrides
@@ -826,6 +844,32 @@ async def run(session: AsyncSession):
         return
 
     log.info("build_predictions fixtures=%s", len(rows))
+    unique_league_ids = sorted({int(r.league_id) for r in rows})
+
+    # Load stacking meta-models (per-league with global fallback)
+    stacking_model_map: Dict[int, Any] = {}
+    if settings.use_stacking:
+        for lid in unique_league_ids:
+            stacking_model_map[lid] = await load_stacking_model(
+                session, league_id=lid, temperature=settings.stacking_temperature
+            )
+        loaded = sum(1 for m in stacking_model_map.values() if m is not None)
+        if loaded:
+            log.info("build_predictions stacking models loaded for %d/%d leagues", loaded, len(unique_league_ids))
+        else:
+            log.warning("build_predictions USE_STACKING=true but no trained models found; using DC-only fallback")
+
+    # Load Dirichlet calibrators (per-league with global fallback)
+    calibrator_map: Dict[int, Any] = {}
+    if settings.use_dirichlet_calib:
+        for lid in unique_league_ids:
+            calibrator_map[lid] = await load_calibrator(session, league_id=lid)
+        loaded_cal = sum(1 for c in calibrator_map.values() if c is not None)
+        if loaded_cal:
+            log.info("build_predictions calibrators loaded for %d/%d leagues", loaded_cal, len(unique_league_ids))
+        else:
+            log.warning("build_predictions USE_DIRICHLET_CALIB=true but no trained calibrators found")
+
     # Avoid leakage from future standings/injuries in backtest calibration runs.
     use_standings = bool(settings.enable_standings) and not settings.backtest_mode
     use_injuries = bool(settings.enable_injuries) and not settings.backtest_mode
@@ -834,6 +878,14 @@ async def run(session: AsyncSession):
     horizon_end = max(r.kickoff for r in rows)
     team_ids = sorted({int(r.home_team_id) for r in rows} | {int(r.away_team_id) for r in rows})
     team_history = await _prefetch_team_values(session, team_ids, horizon_end, limit=40)
+
+    # Pre-fetch H2H stats for all fixture pairs
+    h2h_cache: Dict[Tuple[int, int], Tuple[float, float]] = {}
+    for r in rows:
+        pair = (int(r.home_team_id), int(r.away_team_id))
+        if pair not in h2h_cache:
+            h2h_cache[pair] = await _h2h_stats(session, pair[0], pair[1], r.kickoff)
+
     injury_counts: dict[int, int] = {}
     if use_injuries and team_ids:
         cutoff_dt = utcnow() - timedelta(days=int(getattr(settings, "injuries_ttl_days", 30) or 30))
@@ -857,6 +909,31 @@ async def run(session: AsyncSession):
     new_market_bets: Dict[str, int] = {}
     new_market_skips: Dict[str, int] = {}
     missing_odds = 0
+
+    # Batch-fetch opening odds (earliest snapshot per fixture) for CLV tracking
+    opening_odds_map: Dict[int, Dict[str, float]] = {}
+    fixture_ids_list = [int(r.id) for r in rows]
+    if fixture_ids_list:
+        res_open = await session.execute(
+            text(
+                """
+                SELECT DISTINCT ON (os.fixture_id)
+                  os.fixture_id, os.home_win, os.draw, os.away_win, os.fetched_at
+                FROM odds_snapshots os
+                WHERE os.fixture_id IN (SELECT unnest(CAST(:fids AS integer[])))
+                  AND os.bookmaker_id = :bid
+                ORDER BY os.fixture_id, os.fetched_at ASC
+                """
+            ),
+            {"fids": fixture_ids_list, "bid": settings.bookmaker_id},
+        )
+        for r in res_open.fetchall():
+            opening_odds_map[int(r.fixture_id)] = {
+                "home_win": float(r.home_win) if r.home_win else None,
+                "draw": float(r.draw) if r.draw else None,
+                "away_win": float(r.away_win) if r.away_win else None,
+                "fetched_at": r.fetched_at.isoformat() if r.fetched_at else None,
+            }
 
     # Dixon-Coles: always enabled (DC is the core model)
     use_dc_xg = bool(settings.dc_use_xg)
@@ -1040,12 +1117,51 @@ async def run(session: AsyncSession):
                 )
                 dc_xg_available = True
 
-        # Fair odds (needed before stacking)
-        fair_home, fair_draw, fair_away = remove_overround_basic(
+        # Fair odds (needed before stacking) — Shin's method for accurate margin removal
+        fair_home, fair_draw, fair_away = remove_overround_shin(
             row.home_win, row.draw, row.away_win
+        )
+        # fair_delta: single feature replacing 3 fair_* to avoid draw leakage
+        fair_delta = (
+            float(fair_home) - float(fair_away)
+            if fair_home is not None and fair_away is not None
+            else 0.0
+        )
+
+        # === Derived stacking features ===
+        # xG momentum: (L5 - L10) / max(L10, 0.01) — positive = improving
+        h_xg_l5 = getattr(row, "home_xg_l5", None)
+        h_xg_l10 = getattr(row, "home_xg_l10", None)
+        a_xg_l5 = getattr(row, "away_xg_l5", None)
+        a_xg_l10 = getattr(row, "away_xg_l10", None)
+        xg_momentum_home = (
+            (float(h_xg_l5) - float(h_xg_l10)) / max(float(h_xg_l10), 0.01)
+            if h_xg_l5 is not None and h_xg_l10 is not None else 0.0
+        )
+        xg_momentum_away = (
+            (float(a_xg_l5) - float(a_xg_l10)) / max(float(a_xg_l10), 0.01)
+            if a_xg_l5 is not None and a_xg_l10 is not None else 0.0
+        )
+        # Rest advantage: (home_rest - away_rest) / 24, normalized to ~[-3, 3]
+        home_rest = getattr(row, "home_rest_hours", None)
+        away_rest = getattr(row, "away_rest_hours", None)
+        rest_advantage = (
+            (float(home_rest) - float(away_rest)) / 24.0
+            if home_rest is not None and away_rest is not None else 0.0
+        )
+        # League position delta: away_rank - home_rank (positive = home higher in table)
+        league_pos_delta = (
+            int(row.away_rank or 0) - int(row.home_rank or 0)
+            if use_standings and hasattr(row, "home_rank") and row.home_rank is not None
+            and row.away_rank is not None else 0
+        )
+        # H2H features
+        h2h_draw_rate, h2h_goals_avg = h2h_cache.get(
+            (int(row.home_team_id), int(row.away_team_id)), (0.0, 0.0)
         )
 
         # === Step 2: Model selection (Stacking → DC-only → Poisson fallback) ===
+        stacking_model = stacking_model_map.get(int(row.league_id))
         if stacking_model is not None and dc_core_used:
             stacking_features = {
                 "p_home_poisson": float(p_home_poisson),
@@ -1058,9 +1174,13 @@ async def run(session: AsyncSession):
                 "p_draw_dc_xg": float(p_draw_dc_xg),
                 "p_away_dc_xg": float(p_away_dc_xg),
                 "elo_diff": float(elo_diff),
-                "fair_home": float(fair_home) if fair_home is not None else 0.0,
-                "fair_draw": float(fair_draw) if fair_draw is not None else 0.0,
-                "fair_away": float(fair_away) if fair_away is not None else 0.0,
+                "fair_delta": fair_delta,
+                "xg_momentum_home": xg_momentum_home,
+                "xg_momentum_away": xg_momentum_away,
+                "rest_advantage": rest_advantage,
+                "league_pos_delta": float(league_pos_delta),
+                "h2h_draw_rate": h2h_draw_rate,
+                "h2h_goals_avg": h2h_goals_avg,
             }
             p_home, p_draw, p_away = stacking_model.predict(stacking_features)
             prob_source = "stacking"
@@ -1078,6 +1198,7 @@ async def run(session: AsyncSession):
         p_draw_pre_calib = p_draw
         p_away_pre_calib = p_away
         calibration_method = "none"
+        dirichlet_calibrator = calibrator_map.get(int(row.league_id))
         if settings.use_dirichlet_calib and dirichlet_calibrator is not None:
             p_home, p_draw, p_away = dirichlet_calibrator.calibrate_single(p_home, p_draw, p_away)
             calibration_method = "dirichlet"
@@ -1144,6 +1265,13 @@ async def run(session: AsyncSession):
             "fair_home": float(fair_home) if fair_home is not None else None,
             "fair_draw": float(fair_draw) if fair_draw is not None else None,
             "fair_away": float(fair_away) if fair_away is not None else None,
+            "fair_delta": fair_delta,
+            "xg_momentum_home": xg_momentum_home,
+            "xg_momentum_away": xg_momentum_away,
+            "rest_advantage": rest_advantage,
+            "league_pos_delta": float(league_pos_delta),
+            "h2h_draw_rate": h2h_draw_rate,
+            "h2h_goals_avg": h2h_goals_avg,
             "calibration_method": calibration_method,
             "p_home_pre_calib": float(p_home_pre_calib),
             "p_draw_pre_calib": float(p_draw_pre_calib),
@@ -1152,6 +1280,10 @@ async def run(session: AsyncSession):
             "run_date": settings.backtest_current_date,
             "bt_kind": (settings.backtest_kind or "pseudo").strip().lower(),
         }
+        # Store opening odds for CLV tracking
+        open_odds = opening_odds_map.get(int(row.id))
+        if open_odds:
+            feature_flags["opening_odds"] = open_odds
         if use_standings:
             try:
                 feature_flags["standings_points_diff"] = int((row.home_points or 0) - (row.away_points or 0))

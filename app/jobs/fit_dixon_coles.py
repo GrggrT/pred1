@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logger import get_logger
 from app.core.timeutils import utcnow
-from app.services.dixon_coles import MatchData, fit_dixon_coles
+from app.services.dixon_coles import MatchData, fit_dixon_coles, tune_xi
 
 log = get_logger("jobs.fit_dixon_coles")
 
@@ -155,9 +155,19 @@ async def run(session: AsyncSession) -> dict:
 
         league_summary: dict = {}
 
+        # --- Auto-tune xi if enabled ---
+        xi_goals = DEFAULT_XI
+        if settings.dc_auto_tune_xi and len(matches) >= 50:
+            try:
+                xi_goals, xi_loss = tune_xi(matches, ref_date=as_of)
+                log.info("fit_dc tune_xi league=%d best_xi=%.4f logloss=%.4f", lid, xi_goals, xi_loss)
+                league_summary["tuned_xi"] = xi_goals
+            except Exception as exc:
+                log.warning("fit_dc tune_xi failed league=%d: %s, using default", lid, exc)
+
         # --- DC-goals (always) ---
         try:
-            params_goals = fit_dixon_coles(matches, ref_date=as_of, xi=DEFAULT_XI, use_xg=False)
+            params_goals = fit_dixon_coles(matches, ref_date=as_of, xi=xi_goals, use_xg=False)
         except Exception as exc:
             log.error("fit_dc goals failed league=%d: %s", lid, exc)
             summary[lid] = {"error": str(exc)}
@@ -188,7 +198,7 @@ async def run(session: AsyncSession) -> dict:
             n_with_xg = sum(1 for m in matches if m.home_xg is not None and m.away_xg is not None)
             if n_with_xg >= MIN_MATCHES:
                 try:
-                    params_xg = fit_dixon_coles(matches, ref_date=as_of, xi=DEFAULT_XI, use_xg=True)
+                    params_xg = fit_dixon_coles(matches, ref_date=as_of, xi=xi_goals, use_xg=True)
                     fit_time_xg = time.monotonic() - t_xg_start
                     await _persist_dc_params(session, params_xg, lid, season, as_of, fit_time_xg, "xg")
 

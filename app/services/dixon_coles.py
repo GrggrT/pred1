@@ -111,7 +111,7 @@ def _neg_log_likelihood(
     log_fact_home: np.ndarray,
     log_fact_away: np.ndarray,
 ) -> float:
-    """Negative weighted log-likelihood of the Dixon-Coles model."""
+    """Negative weighted log-likelihood of the Dixon-Coles model (fixed rho)."""
     att, def_, ha = _unpack_params(params_flat, n_teams)
 
     # Vectorized lambda/mu computation
@@ -146,6 +146,64 @@ def _neg_log_likelihood(
 
     log_tau = np.log(tau)
     nll = -np.sum(weights * (log_p + log_tau))
+
+    return float(nll)
+
+
+def _neg_log_likelihood_with_rho(
+    params_flat: np.ndarray,
+    home_idx: np.ndarray,
+    away_idx: np.ndarray,
+    home_goals: np.ndarray,
+    away_goals: np.ndarray,
+    weights: np.ndarray,
+    n_teams: int,
+    log_fact_home: np.ndarray,
+    log_fact_away: np.ndarray,
+    rho_l2_alpha: float,
+) -> float:
+    """Negative log-likelihood with rho as a differentiable parameter + L2 penalty.
+
+    Parameter layout: [att_0..att_{N-2}, def_0..def_{N-2}, HA, rho]
+    L2 penalty on rho: alpha * rho^2 — shrinks rho toward 0 unless data
+    strongly supports non-zero correlation, preventing draw overestimation.
+    """
+    n_free = n_teams - 1
+    rho = float(params_flat[2 * n_free + 1])
+    att_def_ha = params_flat[:2 * n_free + 1]
+
+    att, def_, ha = _unpack_params(att_def_ha, n_teams)
+
+    log_lam = ha + att[home_idx] + def_[away_idx]
+    log_mu = att[away_idx] + def_[home_idx]
+
+    log_lam = np.clip(log_lam, np.log(0.01), np.log(10.0))
+    log_mu = np.clip(log_mu, np.log(0.01), np.log(10.0))
+
+    lam = np.exp(log_lam)
+    mu = np.exp(log_mu)
+
+    log_p = (home_goals * log_lam - lam - log_fact_home
+             + away_goals * log_mu - mu - log_fact_away)
+
+    tau = np.ones(len(home_goals))
+    m00 = (home_goals == 0) & (away_goals == 0)
+    m01 = (home_goals == 0) & (away_goals == 1)
+    m10 = (home_goals == 1) & (away_goals == 0)
+    m11 = (home_goals == 1) & (away_goals == 1)
+
+    tau[m00] = 1.0 - lam[m00] * mu[m00] * rho
+    tau[m01] = 1.0 + lam[m01] * rho
+    tau[m10] = 1.0 + mu[m10] * rho
+    tau[m11] = 1.0 - rho
+
+    tau = np.clip(tau, 1e-6, None)
+
+    log_tau = np.log(tau)
+    nll = -np.sum(weights * (log_p + log_tau))
+
+    # L2 regularization on rho — shrink toward zero
+    nll += rho_l2_alpha * rho * rho
 
     return float(nll)
 
@@ -189,6 +247,7 @@ def fit_dixon_coles(
     xi: float = 0.005,
     rho_grid_steps: int = 71,
     use_xg: bool = False,
+    rho_l2_alpha: float = 0.5,
 ) -> DCParams:
     """Fit Dixon-Coles model on historical matches.
 
@@ -196,9 +255,12 @@ def fit_dixon_coles(
         matches: Completed matches (only with date < ref_date used).
         ref_date: Reference date for time-decay weight calculation.
         xi: Decay rate (days^-1). 0.005 ~ half-life of ~140 days.
-        rho_grid_steps: Number of grid search steps for rho in [-0.35, 0.35].
+        rho_grid_steps: Deprecated, kept for API compatibility. Ignored.
         use_xg: If True, fit on xG values using quasi-Poisson kernel
-                 (no rho/tau, no grid search). Matches without xG are skipped.
+                 (no rho/tau). Matches without xG are skipped.
+        rho_l2_alpha: L2 regularization strength on rho. Higher values
+                      shrink rho toward 0 more aggressively (reduces draw bias).
+                      Default 0.5.
 
     Returns:
         DCParams with optimal parameters.
@@ -244,14 +306,15 @@ def fit_dixon_coles(
 
     # Initial parameters
     n_free = n_teams - 1
-    n_params = 2 * n_free + 1  # att(N-1) + def(N-1) + HA
-    x0 = np.zeros(n_params)
-    x0[-1] = 0.25  # HA initial ~ exp(0.25) ~ 1.28
 
     t_start = time.monotonic()
 
     if use_xg:
         # xG mode: single optimization, rho=0 (tau undefined for fractional scores)
+        n_params = 2 * n_free + 1  # att(N-1) + def(N-1) + HA
+        x0 = np.zeros(n_params)
+        x0[-1] = 0.25  # HA initial ~ exp(0.25) ~ 1.28
+
         opt_args = (home_idx, away_idx, hg, ag, weights, n_teams)
         result = minimize(
             _neg_log_likelihood_xg,
@@ -264,34 +327,36 @@ def fit_dixon_coles(
         best_params = result.x.copy()
         best_rho = 0.0
     else:
-        # Goals mode: grid search over rho with tau correction
-        # Precompute log-factorials
+        # Goals mode: joint optimization with rho as differentiable parameter
+        # + L2 regularization on rho to prevent draw overestimation
         log_fact_home = np.array([_log_factorial(int(g)) for g in hg])
         log_fact_away = np.array([_log_factorial(int(g)) for g in ag])
 
-        rho_values = np.linspace(-0.35, 0.35, rho_grid_steps)
-        best_nll = float("inf")
-        best_params = x0.copy()
-        best_rho = 0.0
+        # Extended parameter vector: [att(N-1), def(N-1), HA, rho]
+        n_params = 2 * n_free + 2
+        x0 = np.zeros(n_params)
+        x0[2 * n_free] = 0.25      # HA initial
+        x0[2 * n_free + 1] = 0.0   # rho initial (neutral)
 
-        for rho_candidate in rho_values:
-            opt_args = (home_idx, away_idx, hg, ag, weights, float(rho_candidate),
-                        n_teams, log_fact_home, log_fact_away)
+        # Bounds: rho in [-0.35, 0.35], others unbounded
+        bounds = [(None, None)] * (2 * n_free + 1)  # att, def, HA
+        bounds.append((-0.35, 0.35))                 # rho
 
-            result = minimize(
-                _neg_log_likelihood,
-                x0,
-                args=opt_args,
-                method="L-BFGS-B",
-                options={"maxiter": 500, "ftol": 1e-8},
-            )
+        opt_args = (home_idx, away_idx, hg, ag, weights,
+                    n_teams, log_fact_home, log_fact_away, rho_l2_alpha)
 
-            if result.fun < best_nll:
-                best_nll = result.fun
-                best_params = result.x.copy()
-                best_rho = float(rho_candidate)
-                # Warm-start next iteration from current best
-                x0 = result.x.copy()
+        result = minimize(
+            _neg_log_likelihood_with_rho,
+            x0,
+            args=opt_args,
+            method="L-BFGS-B",
+            bounds=bounds,
+            options={"maxiter": 500, "ftol": 1e-8},
+        )
+
+        best_nll = result.fun - rho_l2_alpha * result.x[2 * n_free + 1] ** 2  # report NLL without penalty
+        best_params = result.x[:2 * n_free + 1].copy()  # att, def, HA
+        best_rho = float(result.x[2 * n_free + 1])
 
     fit_time = time.monotonic() - t_start
 
@@ -303,8 +368,8 @@ def fit_dixon_coles(
 
     log.info(
         "fit_dixon_coles done mode=%s n_matches=%d n_teams=%d rho=%.4f HA=%.4f "
-        "nll=%.2f time=%.1fs",
-        mode, n, n_teams, best_rho, ha, best_nll, fit_time,
+        "nll=%.2f time=%.1fs rho_l2_alpha=%.2f",
+        mode, n, n_teams, best_rho, ha, best_nll, fit_time, rho_l2_alpha,
     )
 
     return DCParams(

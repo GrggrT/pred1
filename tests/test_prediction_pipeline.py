@@ -108,22 +108,25 @@ class TestModelSelection:
 
 
 class TestStackingFeatureVector:
-    """Verify stacking feature vector has exactly 13 features matching train_stacking.py."""
+    """Verify stacking feature vector has exactly 17 features matching train_stacking.py v5."""
 
     EXPECTED_FEATURES = [
         "p_home_poisson", "p_draw_poisson", "p_away_poisson",
         "p_home_dc", "p_draw_dc", "p_away_dc",
         "p_home_dc_xg", "p_draw_dc_xg", "p_away_dc_xg",
         "elo_diff",
-        "fair_home", "fair_draw", "fair_away",
+        "fair_delta",
+        "xg_momentum_home", "xg_momentum_away",
+        "rest_advantage", "league_pos_delta",
+        "h2h_draw_rate", "h2h_goals_avg",
     ]
 
     def test_feature_count(self):
-        assert len(self.EXPECTED_FEATURES) == 13
+        assert len(self.EXPECTED_FEATURES) == 17
 
     def test_no_deprecated_features(self):
         """Feature vector should not contain deprecated features."""
-        deprecated = ["standings_delta", "rest_diff"]
+        deprecated = ["standings_delta", "rest_diff", "fair_draw", "fair_home", "fair_away"]
         for feat in deprecated:
             assert feat not in self.EXPECTED_FEATURES, f"Deprecated feature {feat} still in vector"
 
