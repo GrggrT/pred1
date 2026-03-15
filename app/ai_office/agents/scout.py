@@ -206,6 +206,20 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         log.info("scout_no_matches — skipping")
         return {"status": "skipped", "reason": "no upcoming matches"}
 
+    # Filter out fixtures that already have a scout report (avoid re-analysis)
+    from ..queries import fetch_existing_scout_fixture_ids
+    existing_ids = await fetch_existing_scout_fixture_ids(session)
+    if existing_ids:
+        before = len(matches)
+        matches = [m for m in matches if m["fixture_id"] not in existing_ids]
+        skipped = before - len(matches)
+        if skipped:
+            log.info("scout_skipped_existing count=%d", skipped)
+
+    if not matches:
+        log.info("scout_all_already_analyzed")
+        return {"status": "skipped", "reason": "all matches already analyzed"}
+
     log.info("scout_matches found=%d", len(matches))
 
     # Check Gemini API key
@@ -221,7 +235,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             session,
             prompt,
             system_prompt=SCOUT_SYSTEM_PROMPT,
-            temperature=0.3,
+            temperature=0.1,
             max_tokens=4096,
             use_cache=False,
         )

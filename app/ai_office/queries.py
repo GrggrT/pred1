@@ -337,6 +337,15 @@ async def save_scout_report(
     return report_id
 
 
+async def fetch_existing_scout_fixture_ids(session: AsyncSession) -> set[int]:
+    """Fetch fixture IDs that already have a scout report (< 24h old)."""
+    result = await session.execute(text("""
+        SELECT fixture_id FROM scout_reports
+        WHERE created_at > now() - interval '24 hours'
+    """))
+    return {row[0] for row in result.fetchall()}
+
+
 async def fetch_red_fixture_ids(session: AsyncSession) -> set[int]:
     """Fetch fixture IDs with active RED scout verdicts (no override)."""
     result = await session.execute(text("""
