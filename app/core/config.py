@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     # AI Office
     telegram_owner_id: str = Field("", alias="TELEGRAM_OWNER_ID")
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
-    gemini_model: str = Field("gemini-2.0-flash", alias="GEMINI_MODEL")
+    gemini_model: str = Field("gemini-2.5-flash", alias="GEMINI_MODEL")
     ai_office_enabled: bool = Field(default=False, alias="AI_OFFICE_ENABLED")
     ai_office_monitor_cron: str = Field("0 */6 * * *", alias="AI_OFFICE_MONITOR_CRON")
     ai_office_analyst_cron: str = Field("0 8 * * *", alias="AI_OFFICE_ANALYST_CRON")
@@ -112,6 +112,7 @@ class Settings(BaseSettings):
     job_maintenance_cron: str = Field("30 3 * * *", alias="JOB_MAINTENANCE_CRON")
     job_quality_report_cron: str = Field("30 6,23 * * *", alias="JOB_QUALITY_REPORT_CRON")
     job_fit_dixon_coles_cron: str = Field("5 6 * * *", alias="JOB_FIT_DIXON_COLES_CRON")
+    job_auto_publish_cron: str = Field("5-59/10 * * * *", alias="JOB_AUTO_PUBLISH_CRON")
     job_fetch_historical_cron: str = Field("0 4 * * *", alias="JOB_FETCH_HISTORICAL_CRON")
     quality_report_cache_ttl_seconds: int = Field(default=12 * 3600, alias="QUALITY_REPORT_CACHE_TTL_SECONDS")
 

@@ -1,4 +1,4 @@
-"""Gemini 2.0 Flash provider with Google Search grounding."""
+"""Gemini provider with Google Search grounding (2.5 Flash default)."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ async def generate_with_search(
     if not settings.gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
 
-    model = settings.gemini_model or "gemini-2.0-flash"
+    model = settings.gemini_model or "gemini-2.5-flash"
 
     if use_cache:
         key = _cache_key(prompt, system_prompt, model, temperature)
@@ -50,6 +50,10 @@ async def generate_with_search(
         if isinstance(cached, dict) and cached.get("text"):
             log.debug("gemini_cache_hit key=%s", key[:16])
             return str(cached["text"])
+
+    # Gemini 2.5 uses thinking tokens from maxOutputTokens budget,
+    # so ensure we have enough room for both thinking and output
+    effective_max = max(max_tokens, 1024)
 
     # Build request payload
     payload: dict = {
@@ -59,7 +63,7 @@ async def generate_with_search(
         "tools": [{"google_search": {}}],
         "generationConfig": {
             "temperature": temperature,
-            "maxOutputTokens": max_tokens,
+            "maxOutputTokens": effective_max,
         },
     }
 
@@ -100,12 +104,35 @@ async def generate_with_search(
 
     content = candidates[0].get("content", {})
     parts = content.get("parts", [])
+    finish_reason = candidates[0].get("finishReason", "")
+
     if not parts:
+        log.warning(
+            "gemini_empty_parts finish_reason=%s thinking=%s",
+            finish_reason,
+            data.get("usageMetadata", {}).get("thoughtsTokenCount"),
+        )
         raise RuntimeError("Gemini API: empty parts in response")
 
-    # Collect text from all parts
-    text_parts = [p["text"] for p in parts if "text" in p]
-    text_out = "\n".join(text_parts).strip()
+    # Gemini 2.5 Flash may return multiple text parts (intermediate + final).
+    # Take the LAST non-thought text part as the final answer.
+    last_text = ""
+    for p in parts:
+        if p.get("thought"):
+            continue
+        txt = p.get("text", "")
+        if txt:
+            last_text = txt
+
+    # If all parts were thought parts, fall back to ANY text part
+    if not last_text:
+        for p in parts:
+            txt = p.get("text", "")
+            if txt:
+                last_text = txt
+                break
+
+    text_out = last_text.strip()
 
     if not text_out:
         raise RuntimeError("Gemini API: empty text in response")

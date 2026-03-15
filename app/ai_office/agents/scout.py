@@ -61,11 +61,18 @@ def _parse_verdicts(
     match_map = {m["fixture_id"]: m for m in matches}
     valid_ids = set(match_map.keys())
 
-    # Try to extract JSON from response (may have markdown fences)
+    # Try to extract JSON from response (may have markdown fences or citations)
     cleaned = raw.strip()
     # Remove markdown code fences if present
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
     cleaned = re.sub(r"\s*```$", "", cleaned)
+    # Remove Gemini 2.5 citation markers [cite: ...] or [cite_N]
+    cleaned = re.sub(r"\[cite:[^\]]*\]", "", cleaned)
+    cleaned = re.sub(r"\[cite_\d+\]", "", cleaned)
+    # Extract JSON array if response has preamble text
+    arr_match = re.search(r"\[[\s\S]*\]", cleaned)
+    if arr_match:
+        cleaned = arr_match.group(0)
     cleaned = cleaned.strip()
 
     parsed = []
@@ -215,7 +222,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             prompt,
             system_prompt=SCOUT_SYSTEM_PROMPT,
             temperature=0.3,
-            max_tokens=2048,
+            max_tokens=4096,
             use_cache=False,
         )
     except Exception:
