@@ -57,5 +57,24 @@ services:
       retries: 3
       start_period: 10s
 
+  ai-office:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      AI_OFFICE_ENABLED: "${AI_OFFICE_ENABLED:-false}"
+      TELEGRAM_BOT_TOKEN: "${AI_OFFICE_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN}}"
+    command: >
+      python -m app.ai_office.runner
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import app.ai_office; print(\"ok\")'"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
 volumes:
   pgdata:

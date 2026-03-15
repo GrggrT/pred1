@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     groq_model: str = Field("llama-3.3-70b-versatile", alias="GROQ_MODEL")
     groq_enabled: bool = Field(default=False, alias="GROQ_ENABLED")
 
+    # AI Office
+    telegram_owner_id: str = Field("", alias="TELEGRAM_OWNER_ID")
+    gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
+    ai_office_enabled: bool = Field(default=False, alias="AI_OFFICE_ENABLED")
+    ai_office_monitor_cron: str = Field("0 */6 * * *", alias="AI_OFFICE_MONITOR_CRON")
+
     league_ids_raw: str = Field("39,78,140,135", alias="LEAGUE_IDS")
     season: int = Field(default_factory=_default_season, alias="SEASON")
     bookmaker_id: int = Field(1, alias="BOOKMAKER_ID")

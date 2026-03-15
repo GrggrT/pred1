@@ -1,0 +1,217 @@
+"""SQL health check queries for AI Office Monitor."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.logger import get_logger
+from .config import MONITOR_THRESHOLDS
+
+log = get_logger("ai_office.queries")
+
+
+async def check_sync_freshness(session: AsyncSession) -> dict[str, Any]:
+    """Check #1: How long ago did sync_data run successfully?"""
+    row = await session.execute(text("""
+        SELECT job_name, status, started_at,
+               EXTRACT(EPOCH FROM now() - started_at) / 3600 AS hours_ago
+        FROM job_runs
+        WHERE job_name = 'sync_data'
+        ORDER BY started_at DESC
+        LIMIT 1
+    """))
+    r = row.mappings().first()
+    if not r:
+        return {
+            "name": "sync_freshness",
+            "label": "Sync Data",
+            "value": None,
+            "threshold": MONITOR_THRESHOLDS["sync_hours_warn"],
+            "severity": "high",
+            "ok": False,
+            "detail": "No sync_data runs found",
+        }
+    hours = float(r["hours_ago"]) if r["hours_ago"] is not None else 999
+    threshold = MONITOR_THRESHOLDS["sync_hours_warn"]
+    return {
+        "name": "sync_freshness",
+        "label": "Sync Data",
+        "value": round(hours, 1),
+        "threshold": threshold,
+        "severity": "medium",
+        "ok": hours <= threshold,
+        "detail": f"Last sync {hours:.1f}h ago, status={r['status']}",
+    }
+
+
+async def check_upcoming_predictions(session: AsyncSession) -> dict[str, Any]:
+    """Check #2: Are there predictions for upcoming matches (next 48h)?"""
+    row = await session.execute(text("""
+        SELECT COUNT(*) AS cnt
+        FROM predictions p
+        JOIN fixtures f ON f.id = p.fixture_id
+        WHERE f.status = 'NS'
+          AND f.kickoff BETWEEN now() AND now() + interval '48 hours'
+    """))
+    cnt = row.scalar() or 0
+    threshold = MONITOR_THRESHOLDS["upcoming_predictions_min"]
+    return {
+        "name": "upcoming_predictions",
+        "label": "Upcoming Predictions",
+        "value": cnt,
+        "threshold": threshold,
+        "severity": "high",
+        "ok": cnt >= threshold,
+        "detail": f"{cnt} predictions for matches in next 48h",
+    }
+
+
+async def check_unsettled(session: AsyncSession) -> dict[str, Any]:
+    """Check #3: Unsettled predictions for finished matches (>3h ago)."""
+    row = await session.execute(text("""
+        SELECT COUNT(*) AS cnt
+        FROM fixtures f
+        JOIN predictions p ON p.fixture_id = f.id
+        WHERE f.status = 'FT'
+          AND p.status = 'PENDING'
+          AND f.kickoff < now() - interval '3 hours'
+    """))
+    cnt = row.scalar() or 0
+    threshold = MONITOR_THRESHOLDS["unsettled_warn"]
+    return {
+        "name": "unsettled",
+        "label": "Unsettled Matches",
+        "value": cnt,
+        "threshold": threshold,
+        "severity": "medium",
+        "ok": cnt <= threshold,
+        "detail": f"{cnt} unsettled finished predictions",
+    }
+
+
+async def check_api_usage(session: AsyncSession) -> dict[str, Any]:
+    """Check #4: Active API cache entries (proxy for API usage)."""
+    row = await session.execute(text("""
+        SELECT COUNT(*) AS cnt
+        FROM api_cache
+        WHERE expires_at > now()
+    """))
+    cnt = row.scalar() or 0
+    daily_limit = settings.api_football_daily_limit
+    pct = cnt / max(daily_limit, 1)
+    threshold = MONITOR_THRESHOLDS["api_cache_24h_warn"]
+    return {
+        "name": "api_usage",
+        "label": "API Usage (24h)",
+        "value": cnt,
+        "threshold": f"{threshold * 100:.0f}% of {daily_limit}",
+        "severity": "medium",
+        "ok": pct <= threshold,
+        "detail": f"{cnt} API calls ({pct * 100:.1f}% of {daily_limit} limit)",
+    }
+
+
+async def check_pinnacle_odds(session: AsyncSession) -> dict[str, Any]:
+    """Check #5: Pinnacle odds synced in last 24h."""
+    row = await session.execute(text("""
+        SELECT COUNT(*) AS cnt
+        FROM odds
+        WHERE bookmaker_id = 4
+          AND fetched_at > now() - interval '24 hours'
+    """))
+    cnt = row.scalar() or 0
+    threshold = MONITOR_THRESHOLDS["pinnacle_24h_min"]
+    return {
+        "name": "pinnacle_odds",
+        "label": "Pinnacle Odds (24h)",
+        "value": cnt,
+        "threshold": threshold,
+        "severity": "medium",
+        "ok": cnt >= threshold,
+        "detail": f"{cnt} Pinnacle odds updated in 24h",
+    }
+
+
+async def check_errors_24h(session: AsyncSession) -> dict[str, Any]:
+    """Check #6: Job errors in last 24 hours."""
+    row = await session.execute(text("""
+        SELECT COUNT(*) AS cnt
+        FROM job_runs
+        WHERE status = 'ERROR'
+          AND started_at > now() - interval '24 hours'
+    """))
+    cnt = row.scalar() or 0
+    threshold = MONITOR_THRESHOLDS["errors_24h_warn"]
+    return {
+        "name": "errors_24h",
+        "label": "Errors (24h)",
+        "value": cnt,
+        "threshold": threshold,
+        "severity": "high",
+        "ok": cnt <= threshold,
+        "detail": f"{cnt} job errors in last 24h",
+    }
+
+
+async def run_all_checks(session: AsyncSession) -> list[dict[str, Any]]:
+    """Run all 6 health checks and return results."""
+    checks = []
+    for check_fn in [
+        check_sync_freshness,
+        check_upcoming_predictions,
+        check_unsettled,
+        check_api_usage,
+        check_pinnacle_odds,
+        check_errors_24h,
+    ]:
+        try:
+            result = await check_fn(session)
+            checks.append(result)
+        except Exception as exc:
+            log.exception("health_check_failed fn=%s", check_fn.__name__)
+            await session.rollback()
+            checks.append({
+                "name": check_fn.__name__.replace("check_", ""),
+                "label": check_fn.__name__,
+                "value": None,
+                "threshold": None,
+                "severity": "high",
+                "ok": False,
+                "detail": f"Check failed: {exc}",
+            })
+    return checks
+
+
+async def save_report(
+    session: AsyncSession,
+    agent: str,
+    report_type: str,
+    report_text: str,
+    metadata: dict | None = None,
+    telegram_sent: bool = False,
+) -> int:
+    """Save an agent report to ai_office_reports. Returns report id."""
+    import json
+
+    result = await session.execute(
+        text("""
+            INSERT INTO ai_office_reports (agent, report_type, report_text, metadata, telegram_sent)
+            VALUES (:agent, :report_type, :report_text, :metadata::jsonb, :telegram_sent)
+            RETURNING id
+        """),
+        {
+            "agent": agent,
+            "report_type": report_type,
+            "report_text": report_text,
+            "metadata": json.dumps(metadata or {}),
+            "telegram_sent": telegram_sent,
+        },
+    )
+    await session.commit()
+    report_id = result.scalar()
+    log.info("report_saved agent=%s type=%s id=%s", agent, report_type, report_id)
+    return report_id
