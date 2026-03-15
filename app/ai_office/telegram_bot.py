@@ -95,6 +95,58 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(HELP_TEXT, parse_mode="HTML")
 
 
+async def cmd_settled(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /settled command — run analyst agent on-demand."""
+    if not _is_owner(update):
+        return
+
+    log.info("cmd_settled from user=%s", update.effective_user.id)
+
+    try:
+        from .agents.analyst import run as analyst_run
+
+        async with SessionLocal() as session:
+            result = await analyst_run(session)
+
+        status = result.get("status", "done")
+        if status == "skipped":
+            reason = html.escape(result.get("reason", "no data"))
+            await update.message.reply_text(
+                f"📊 Analyst: нет данных — {reason}",
+                parse_mode="HTML",
+            )
+        # If status == "sent", agent already sent the report via send_to_owner
+    except Exception:
+        log.exception("cmd_settled_error")
+        await update.message.reply_text("❌ Ошибка при запуске аналитика")
+
+
+async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /picks command — run content writer agent on-demand."""
+    if not _is_owner(update):
+        return
+
+    log.info("cmd_picks from user=%s", update.effective_user.id)
+
+    try:
+        from .agents.content import run as content_run
+
+        async with SessionLocal() as session:
+            result = await content_run(session)
+
+        status = result.get("status", "done")
+        if status == "skipped":
+            reason = html.escape(result.get("reason", "no data"))
+            await update.message.reply_text(
+                f"✍️ Content: нет данных — {reason}",
+                parse_mode="HTML",
+            )
+        # If status == "sent", agent already sent the post via send_to_owner
+    except Exception:
+        log.exception("cmd_picks_error")
+        await update.message.reply_text("❌ Ошибка при запуске контентщика")
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command — welcome message."""
     if not _is_owner(update):
@@ -122,6 +174,8 @@ def build_bot() -> Application:
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("settled", cmd_settled))
+    app.add_handler(CommandHandler("picks", cmd_picks))
     app.add_handler(CommandHandler("help", cmd_help))
 
     log.info("telegram_bot_built handlers=%d", len(app.handlers[0]))

@@ -1,4 +1,4 @@
-"""SQL health check queries for AI Office Monitor."""
+"""SQL queries for AI Office agents — health checks, settled, upcoming picks."""
 
 from __future__ import annotations
 
@@ -200,7 +200,7 @@ async def save_report(
     result = await session.execute(
         text("""
             INSERT INTO ai_office_reports (agent, report_type, report_text, metadata, telegram_sent)
-            VALUES (:agent, :report_type, :report_text, :metadata::jsonb, :telegram_sent)
+            VALUES (:agent, :report_type, :report_text, CAST(:metadata AS jsonb), :telegram_sent)
             RETURNING id
         """),
         {
@@ -215,3 +215,92 @@ async def save_report(
     report_id = result.scalar()
     log.info("report_saved agent=%s type=%s id=%s", agent, report_type, report_id)
     return report_id
+
+
+# ---------------------------------------------------------------------------
+# Analyst queries
+# ---------------------------------------------------------------------------
+
+async def fetch_settled_24h(session: AsyncSession) -> list[dict[str, Any]]:
+    """Fetch settled predictions from the last 24 hours (1X2 + totals)."""
+    result = await session.execute(text("""
+        SELECT '1X2' as market, p.selection_code as selection, p.status,
+               p.initial_odd, p.profit, p.confidence,
+               p.feature_flags,
+               ht.name as home_team, att.name as away_team,
+               f.home_goals, f.away_goals, f.kickoff,
+               l.name as league
+        FROM predictions p
+        JOIN fixtures f ON f.id = p.fixture_id
+        JOIN teams ht ON ht.id = f.home_team_id
+        JOIN teams att ON att.id = f.away_team_id
+        JOIN leagues l ON l.id = f.league_id
+        WHERE p.settled_at > now() - interval '24 hours'
+          AND p.status IN ('WON', 'LOSS')
+          AND p.selection_code != 'SKIP'
+
+        UNION ALL
+
+        SELECT pt.market, pt.selection, pt.status,
+               pt.initial_odd, pt.profit, pt.confidence,
+               NULL::jsonb as feature_flags,
+               ht.name as home_team, att.name as away_team,
+               f.home_goals, f.away_goals, f.kickoff,
+               l.name as league
+        FROM predictions_totals pt
+        JOIN fixtures f ON f.id = pt.fixture_id
+        JOIN teams ht ON ht.id = f.home_team_id
+        JOIN teams att ON att.id = f.away_team_id
+        JOIN leagues l ON l.id = f.league_id
+        WHERE pt.settled_at > now() - interval '24 hours'
+          AND pt.status IN ('WON', 'LOSS')
+
+        ORDER BY league, kickoff
+    """))
+    return [dict(r) for r in result.mappings().all()]
+
+
+# ---------------------------------------------------------------------------
+# Content queries
+# ---------------------------------------------------------------------------
+
+async def fetch_upcoming_picks(session: AsyncSession) -> list[dict[str, Any]]:
+    """Fetch 1X2 predictions for upcoming matches (next 36 hours)."""
+    result = await session.execute(text("""
+        SELECT '1X2' as market,
+               p.selection_code as selection, p.initial_odd, p.confidence,
+               p.feature_flags,
+               f.kickoff, f.id as fixture_id,
+               ht.name as home_team, att.name as away_team,
+               l.name as league
+        FROM predictions p
+        JOIN fixtures f ON f.id = p.fixture_id
+        JOIN teams ht ON ht.id = f.home_team_id
+        JOIN teams att ON att.id = f.away_team_id
+        JOIN leagues l ON l.id = f.league_id
+        WHERE f.status = 'NS'
+          AND f.kickoff BETWEEN now() AND now() + interval '36 hours'
+          AND p.selection_code != 'SKIP'
+        ORDER BY f.kickoff
+    """))
+    return [dict(r) for r in result.mappings().all()]
+
+
+async def fetch_upcoming_totals(session: AsyncSession) -> list[dict[str, Any]]:
+    """Fetch totals/BTTS/DC predictions for upcoming matches (next 36 hours)."""
+    result = await session.execute(text("""
+        SELECT pt.market, pt.selection, pt.initial_odd, pt.confidence,
+               NULL::jsonb as feature_flags,
+               f.kickoff, f.id as fixture_id,
+               ht.name as home_team, att.name as away_team,
+               l.name as league
+        FROM predictions_totals pt
+        JOIN fixtures f ON f.id = pt.fixture_id
+        JOIN teams ht ON ht.id = f.home_team_id
+        JOIN teams att ON att.id = f.away_team_id
+        JOIN leagues l ON l.id = f.league_id
+        WHERE f.status = 'NS'
+          AND f.kickoff BETWEEN now() AND now() + interval '36 hours'
+        ORDER BY f.kickoff
+    """))
+    return [dict(r) for r in result.mappings().all()]

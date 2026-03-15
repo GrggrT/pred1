@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
     ai_office_enabled: bool = Field(default=False, alias="AI_OFFICE_ENABLED")
     ai_office_monitor_cron: str = Field("0 */6 * * *", alias="AI_OFFICE_MONITOR_CRON")
+    ai_office_analyst_cron: str = Field("0 8 * * *", alias="AI_OFFICE_ANALYST_CRON")
+    ai_office_content_picks_cron: str = Field("0 12 * * *", alias="AI_OFFICE_CONTENT_PICKS_CRON")
 
     league_ids_raw: str = Field("39,78,140,135", alias="LEAGUE_IDS")
     season: int = Field(default_factory=_default_season, alias="SEASON")

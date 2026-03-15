@@ -1,7 +1,7 @@
 """AI Office runner — main entry point for Docker service.
 
 Runs:
-1. APScheduler with monitor agent on cron schedule
+1. APScheduler with monitor, analyst, and content agents on cron schedules
 2. Telegram bot polling loop
 """
 
@@ -33,6 +33,32 @@ async def _run_monitor() -> None:
             log.info("scheduled_monitor_done result=%s", result)
     except Exception:
         log.exception("scheduled_monitor_error")
+
+
+async def _run_analyst() -> None:
+    """Wrapper to run analyst agent with its own DB session."""
+    from app.ai_office.agents.analyst import run as analyst_run
+
+    log.info("scheduled_analyst_start")
+    try:
+        async with SessionLocal() as session:
+            result = await analyst_run(session)
+            log.info("scheduled_analyst_done result=%s", result)
+    except Exception:
+        log.exception("scheduled_analyst_error")
+
+
+async def _run_content_picks() -> None:
+    """Wrapper to run content picks agent with its own DB session."""
+    from app.ai_office.agents.content import run as content_run
+
+    log.info("scheduled_content_picks_start")
+    try:
+        async with SessionLocal() as session:
+            result = await content_run(session)
+            log.info("scheduled_content_picks_done result=%s", result)
+    except Exception:
+        log.exception("scheduled_content_picks_error")
 
 
 async def main() -> None:
@@ -70,6 +96,38 @@ async def main() -> None:
     except Exception:
         log.exception("scheduler_cron_parse_failed cron=%s", cron_expr)
         sys.exit(1)
+
+    # Analyst agent — daily settled predictions report
+    analyst_cron = settings.ai_office_analyst_cron
+    try:
+        trigger = CronTrigger.from_crontab(analyst_cron)
+        scheduler.add_job(
+            _run_analyst,
+            trigger=trigger,
+            id="ai_office_analyst",
+            max_instances=1,
+            coalesce=True,
+            name="AI Office Analyst",
+        )
+        log.info("scheduler_job_added job=analyst cron=%s", analyst_cron)
+    except Exception:
+        log.exception("scheduler_cron_parse_failed cron=%s", analyst_cron)
+
+    # Content picks agent — daily predictions post
+    content_cron = settings.ai_office_content_picks_cron
+    try:
+        trigger = CronTrigger.from_crontab(content_cron)
+        scheduler.add_job(
+            _run_content_picks,
+            trigger=trigger,
+            id="ai_office_content_picks",
+            max_instances=1,
+            coalesce=True,
+            name="AI Office Content Picks",
+        )
+        log.info("scheduler_job_added job=content_picks cron=%s", content_cron)
+    except Exception:
+        log.exception("scheduler_cron_parse_failed cron=%s", content_cron)
 
     scheduler.start()
     log.info("scheduler_started jobs=%d", len(scheduler.get_jobs()))
