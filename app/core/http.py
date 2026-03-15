@@ -11,9 +11,11 @@ _api_football_client: httpx.AsyncClient | None = None
 _openweather_client: httpx.AsyncClient | None = None
 _telegram_client: httpx.AsyncClient | None = None
 _deepl_client: httpx.AsyncClient | None = None
+_groq_client: httpx.AsyncClient | None = None
 _assets_client: httpx.AsyncClient | None = None
 _telegram_token: str | None = None
 _deepl_base: str | None = None
+_groq_base: str | None = None
 
 
 def _http_limits() -> httpx.Limits:
@@ -74,6 +76,23 @@ def deepl_client() -> httpx.AsyncClient:
     return _deepl_client
 
 
+def groq_client() -> httpx.AsyncClient:
+    global _groq_client, _groq_base
+    base = (settings.groq_api_base or "").strip() or "https://api.groq.com/openai/v1"
+    if _groq_client is None or _groq_client.is_closed or _groq_base != base:
+        _groq_base = base
+        _groq_client = httpx.AsyncClient(
+            base_url=base,
+            headers={
+                "Authorization": f"Bearer {settings.groq_api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=httpx.Timeout(30.0),
+            limits=_http_limits(),
+        )
+    return _groq_client
+
+
 def assets_client() -> httpx.AsyncClient:
     global _assets_client
     if _assets_client is None or _assets_client.is_closed:
@@ -92,10 +111,12 @@ async def init_http_clients() -> None:
         telegram_client()
     if settings.deepl_api_key:
         deepl_client()
+    if settings.groq_enabled and settings.groq_api_key:
+        groq_client()
 
 
 async def close_http_clients() -> None:
-    global _api_football_client, _openweather_client, _telegram_client, _deepl_client, _assets_client, _telegram_token, _deepl_base
+    global _api_football_client, _openweather_client, _telegram_client, _deepl_client, _groq_client, _assets_client, _telegram_token, _deepl_base, _groq_base
     if _api_football_client is not None and not _api_football_client.is_closed:
         await _api_football_client.aclose()
     if _openweather_client is not None and not _openweather_client.is_closed:
@@ -104,15 +125,19 @@ async def close_http_clients() -> None:
         await _telegram_client.aclose()
     if _deepl_client is not None and not _deepl_client.is_closed:
         await _deepl_client.aclose()
+    if _groq_client is not None and not _groq_client.is_closed:
+        await _groq_client.aclose()
     if _assets_client is not None and not _assets_client.is_closed:
         await _assets_client.aclose()
     _api_football_client = None
     _openweather_client = None
     _telegram_client = None
     _deepl_client = None
+    _groq_client = None
     _assets_client = None
     _telegram_token = None
     _deepl_base = None
+    _groq_base = None
 
 
 def _parse_retry_after(value: str | None) -> float | None:

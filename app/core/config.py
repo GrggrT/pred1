@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     publish_metrics_window_hours: int = Field(default=24, alias="PUBLISH_METRICS_WINDOW_HOURS")
     publish_html_fallback_alert_pct: Decimal = Field(default=Decimal("15"), alias="PUBLISH_HTML_FALLBACK_ALERT_PCT")
 
+    groq_api_key: str = Field("", alias="GROQ_API_KEY")
+    groq_api_base: str = Field("https://api.groq.com/openai/v1", alias="GROQ_API_BASE")
+    groq_model: str = Field("llama-3.3-70b-versatile", alias="GROQ_MODEL")
+    groq_enabled: bool = Field(default=False, alias="GROQ_ENABLED")
+
     league_ids_raw: str = Field("39,78,140,135", alias="LEAGUE_IDS")
     season: int = Field(default_factory=_default_season, alias="SEASON")
     bookmaker_id: int = Field(1, alias="BOOKMAKER_ID")

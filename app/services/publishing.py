@@ -20,6 +20,7 @@ from app.core.logger import get_logger
 from app.data.providers.api_football import get_fixture_by_id, get_standings
 from app.data.providers.deepl import translate_html
 from app.data.providers.telegram import send_message_parts, send_photo
+from app.services.ai_enrich import enrich_analysis, translate_text
 try:
     from app.services.html_image import render_headline_image_html
 except Exception:  # pragma: no cover - startup must survive optional renderer failures
@@ -3549,6 +3550,10 @@ async def _build_preview_internal(session: AsyncSession, fixture_id: int) -> tup
             reasons,
             "ru",
         )
+        if settings.groq_enabled:
+            analysis_raw = await enrich_analysis(
+                session, analysis_raw, fixture, pred, indices, market,
+            )
         markets.append(
             MarketPreview(
                 market=market,
@@ -3717,8 +3722,18 @@ async def build_post_preview(
             reasons,
             local_lang,
         )
+        # AI enrichment (Russian source text only)
+        if settings.groq_enabled and local_lang == "ru":
+            analysis_raw = await enrich_analysis(
+                session, analysis_raw, fixture, pred, indices, market_name,
+            )
+
+        # Translation: Groq (if enabled) or DeepL (fallback)
         protected: list[str] = []
-        if use_deepl:
+        if settings.groq_enabled and lang_key != local_lang:
+            headline_raw = await translate_text(session, headline_raw, lang_key, local_lang)
+            analysis_raw = await translate_text(session, analysis_raw, lang_key, local_lang)
+        elif use_deepl:
             protected = _extract_protected_values(f"{headline_raw}\n{analysis_raw}")
             headline_payload = _prepare_translation_html(headline_raw)
             analysis_payload = _prepare_translation_html(analysis_raw)
@@ -3729,7 +3744,7 @@ async def build_post_preview(
 
         headline = _strip_protect_tags(headline_raw)
         analysis = _strip_protect_tags(analysis_raw)
-        if use_deepl:
+        if use_deepl and not settings.groq_enabled:
             headline = _normalize_translated_text(headline, protected)
             analysis = _normalize_translated_text(analysis, protected)
 
@@ -4155,8 +4170,18 @@ async def publish_fixture(
                 reasons,
                 local_lang,
             )
+            # AI enrichment (Russian source text only)
+            if settings.groq_enabled and local_lang == "ru":
+                analysis_raw = await enrich_analysis(
+                    session, analysis_raw, fixture, pred, indices, market["market"],
+                )
+
+            # Translation: Groq (if enabled) or DeepL (fallback)
             protected: list[str] = []
-            if use_deepl:
+            if settings.groq_enabled and lang_key != local_lang:
+                headline_raw = await translate_text(session, headline_raw, lang_key, local_lang)
+                analysis_raw = await translate_text(session, analysis_raw, lang_key, local_lang)
+            elif use_deepl:
                 protected = _extract_protected_values(f"{headline_raw}\n{analysis_raw}")
                 headline_payload = _prepare_translation_html(headline_raw)
                 analysis_payload = _prepare_translation_html(analysis_raw)
@@ -4167,7 +4192,7 @@ async def publish_fixture(
 
             headline = _strip_protect_tags(headline_raw)
             analysis = _strip_protect_tags(analysis_raw)
-            if use_deepl:
+            if use_deepl and not settings.groq_enabled:
                 headline = _normalize_translated_text(headline, protected)
                 analysis = _normalize_translated_text(analysis, protected)
 
