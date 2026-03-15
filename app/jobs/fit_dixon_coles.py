@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.logger import get_logger
 from app.core.timeutils import utcnow
 from app.services.dixon_coles import MatchData, fit_dixon_coles
+from app.services.dixon_coles_cmp import fit_cmp_dixon_coles, MatchData as CMPMatchData
 
 log = get_logger("jobs.fit_dixon_coles")
 
@@ -207,6 +208,73 @@ async def run(session: AsyncSession) -> dict:
             else:
                 log.info("fit_dc xG skip league=%d n_with_xg=%d (need %d)", lid, n_with_xg, MIN_MATCHES)
                 league_summary["xg_skipped"] = True
+
+        # --- CMP-DC (always, uses goals) ---
+        use_cmp = bool(getattr(settings, "dc_use_cmp", True))
+        if use_cmp:
+            t_cmp_start = time.monotonic()
+            try:
+                cmp_matches = [
+                    CMPMatchData(
+                        home_id=m.home_id, away_id=m.away_id,
+                        home_goals=m.home_goals, away_goals=m.away_goals,
+                        date=m.date, home_xg=m.home_xg, away_xg=m.away_xg,
+                    )
+                    for m in matches
+                ]
+                params_cmp = fit_cmp_dixon_coles(
+                    cmp_matches, ref_date=as_of, xi=DEFAULT_XI,
+                    rho_grid_steps=21,
+                )
+                fit_time_cmp = time.monotonic() - t_cmp_start
+
+                # Persist CMP params with param_source='cmp'
+                await _persist_dc_params(
+                    session, params_cmp, lid, season, as_of, fit_time_cmp, "cmp",
+                )
+                # Also persist nu0, nu1 in dc_global_params
+                await session.execute(
+                    text("""
+                        UPDATE dc_global_params
+                        SET nu0 = :nu0, nu1 = :nu1
+                        WHERE league_id = :lid AND season = :season
+                          AND as_of_date = :as_of AND param_source = 'cmp'
+                    """),
+                    {
+                        "lid": lid, "season": season, "as_of": as_of,
+                        "nu0": params_cmp.nu0, "nu1": params_cmp.nu1,
+                    },
+                )
+                # Persist team-specific HA deltas
+                for team_id, ha_delta in params_cmp.team_ha.items():
+                    await session.execute(
+                        text("""
+                            UPDATE team_strength_params
+                            SET home_advantage_delta = :ha_delta
+                            WHERE team_id = :tid AND league_id = :lid
+                              AND season = :season AND as_of_date = :as_of
+                              AND param_source = 'cmp'
+                        """),
+                        {
+                            "tid": team_id, "lid": lid, "season": season,
+                            "as_of": as_of, "ha_delta": ha_delta,
+                        },
+                    )
+
+                log.info(
+                    "fit_dc cmp done league=%d n=%d teams=%d HA=%.4f rho=%.4f "
+                    "nu0=%.3f nu1=%.3f ll=%.2f time=%.1fs",
+                    lid, params_cmp.n_matches, params_cmp.n_teams,
+                    params_cmp.home_advantage, params_cmp.rho,
+                    params_cmp.nu0, params_cmp.nu1,
+                    params_cmp.log_likelihood, fit_time_cmp,
+                )
+                league_summary["fit_seconds_cmp"] = round(fit_time_cmp, 2)
+                league_summary["cmp_nu0"] = params_cmp.nu0
+                league_summary["cmp_nu1"] = params_cmp.nu1
+            except Exception as exc:
+                log.warning("fit_dc cmp failed league=%d: %s", lid, exc)
+                league_summary["cmp_error"] = str(exc)
 
         await session.commit()
         summary[lid] = league_summary

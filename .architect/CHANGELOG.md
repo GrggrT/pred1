@@ -4,6 +4,78 @@
 
 ---
 
+## 2026-03-13 — Roadmap Validation (Task 22)
+
+### 1. Step-by-step validation of Strategic Improvement Roadmap
+
+**Step 1: Migrations + Tests — PASSED**
+- Migrations 0035 (team_standings_history), 0036 (opening odds), 0037 (CMP params) applied
+- Compilation clean, 300 tests passed (21 pre-existing failures)
+
+**Step 2: Standings Backfill — PASSED**
+- 21,135 records across 6 leagues, 2 seasons
+- LATERAL join verified: avg_rank_diff 6.0-6.7, avg_pts_diff 8.5-9.7
+
+**Step 3: CMP-DC Ablation — FAILED**
+- 0/6 leagues improved (gate: 3/6 needed)
+- Global ΔRPS = +0.00042 (CMP-DC slightly worse)
+- La Liga worst: +0.00221 ΔRPS with highest nu values (mean 1.217)
+- Fitted nu0 < 1.0 for EPL (0.917) and Bundesliga (0.800) — overdispersed, not underdispersed
+- **Decision**: `DC_USE_CMP=false`
+
+**Step 4: Stacking Retrain — PARTIAL**
+- V2 retrain confirmed existing model is optimal (val_RPS=0.1886)
+- V3 features: 0 predictions exist with new features → deferred
+
+**Step 5: Production Activation — COMPLETED**
+- `DC_USE_CMP=false`, `SYNC_PINNACLE_ODDS=true`, `USE_PINNACLE_CALIB=false`, `ENABLE_KELLY=false`
+
+### 2. Bugs fixed
+- API Football bookmaker param: `bookmaker=8,4` → empty filter `[]` (sync_data.py)
+- CMP `_log_factorial` IndexError: numpy float to int conversion (com_poisson.py)
+- CMP `cmp_pmf` same IndexError fix (com_poisson.py)
+
+### 3. Files changed
+- `app/jobs/sync_data.py`: dual-bookmaker fetching, Pinnacle odds capture, API param fix
+- `app/jobs/evaluate_results.py`: dual CLV tracking (soft + Pinnacle)
+- `app/services/com_poisson.py`: int conversion bug fixes
+- `scripts/ablation_cmp_dc.py`: new ablation script (psycopg2)
+- `scripts/train_pinnacle_calibrator.py`: new training script
+- `.env`: roadmap settings added (DC_USE_CMP, SYNC_PINNACLE_ODDS, etc.)
+
+### 4. Validation report
+- `results/validation_report_roadmap.md` — full tables per step
+
+### 5. Test results
+- 300 passed, 21 pre-existing failures
+
+---
+
+## 2026-03-10 — Logistic removal + Primeira Liga disabled (Task 21)
+
+### 1. Logistic fallback removal
+- **Confirmed**: logistic fallback was already removed from `build_predictions.py` in Task 15 refactoring
+- **Cleanup**: removed legacy `.env` flags `USE_LOGISTIC_PROBS`, `USE_HYBRID_PROBS`, `HYBRID_WEIGHTS`
+- **Verification**: AST-based test confirms only `stacking`/`dc`/`poisson_fallback` as prob_source values
+
+### 2. Primeira Liga (ID 94) disabled for predictions
+- **New config**: `DISABLED_PREDICTION_LEAGUES` in `config.py` (comma-separated league IDs)
+- **Set**: `DISABLED_PREDICTION_LEAGUES=94` in `.env`
+- **Behavior**: data sync continues, prediction generation skipped for disabled leagues
+- **Both 1X2 and secondary markets** skip disabled leagues (single check at loop start)
+
+### 3. Files changed
+- `app/core/config.py`: added `disabled_prediction_leagues_raw` field + `disabled_prediction_leagues` property
+- `app/jobs/build_predictions.py`: added disabled league skip at top of fixture loop
+- `.env`: removed legacy logistic flags, added `DISABLED_PREDICTION_LEAGUES=94`
+- `.env.example`: added `DISABLED_PREDICTION_LEAGUES` documentation
+- `tests/test_disabled_leagues.py`: 6 new tests (config parsing + AST verification)
+
+### 4. Test results
+- 6 new tests pass, 292 existing tests pass, 0 regressions
+
+---
+
 ## 2026-03-01 — Post-monitoring configuration update (Task 20)
 
 ### 1. Runtime config hardening (.env)

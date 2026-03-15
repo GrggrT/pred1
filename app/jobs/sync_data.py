@@ -298,6 +298,14 @@ async def _upsert_odds(
         bet365_over_3_5 = bet365_under_3_5 = None
         bet365_btts_yes = bet365_btts_no = None
         bet365_dc_1x = bet365_dc_x2 = bet365_dc_12 = None
+        # Pinnacle odds (for calibration target)
+        pin_home = pin_draw = pin_away = None
+        pin_over = pin_under = None
+        pin_over_1_5 = pin_under_1_5 = None
+        pin_over_3_5 = pin_under_3_5 = None
+        pin_btts_yes = pin_btts_no = None
+        pin_dc_1x = pin_dc_x2 = pin_dc_12 = None
+        _sync_pinnacle = settings.sync_pinnacle_odds and settings.pinnacle_bookmaker_id != settings.bookmaker_id
         home_list: list[float] = []
         draw_list: list[float] = []
         away_list: list[float] = []
@@ -357,6 +365,14 @@ async def _upsert_odds(
                 bet365_over_3_5, bet365_under_3_5 = o35, u35
                 bet365_btts_yes, bet365_btts_no = btts_y, btts_n
                 bet365_dc_1x, bet365_dc_x2, bet365_dc_12 = dc1x, dcx2, dc12
+            # Also capture Pinnacle odds for calibration
+            if _sync_pinnacle and bookmaker.get("id") == settings.pinnacle_bookmaker_id:
+                pin_home, pin_draw, pin_away = home, draw, away
+                pin_over, pin_under = over_25, under_25
+                pin_over_1_5, pin_under_1_5 = o15, u15
+                pin_over_3_5, pin_under_3_5 = o35, u35
+                pin_btts_yes, pin_btts_no = btts_y, btts_n
+                pin_dc_1x, pin_dc_x2, pin_dc_12 = dc1x, dcx2, dc12
 
         if not any([bet365_home, bet365_draw, bet365_away, bet365_over, bet365_under]):
             # no odds from target bookmaker; skip
@@ -406,13 +422,15 @@ async def _upsert_odds(
                                  dc_1x, dc_x2, dc_12,
                                  market_avg_home_win, market_avg_draw, market_avg_away_win,
                                  market_avg_over_2_5, market_avg_under_2_5,
-                                 fetched_at)
+                                 fetched_at,
+                                 opening_home_win, opening_draw, opening_away_win, opening_fetched_at)
                 VALUES(:fid, :bid, :h, :d, :a, :ov, :un,
                        :o15, :u15, :o35, :u35,
                        :by, :bn,
                        :dc1x, :dcx2, :dc12,
                        :mah, :mad, :maa, :mover, :munder,
-                       :fetched_at)
+                       :fetched_at,
+                       :h, :d, :a, :fetched_at)
                 ON CONFLICT (fixture_id, bookmaker_id) DO UPDATE SET
                   home_win=:h, draw=:d, away_win=:a,
                   over_2_5=:ov, under_2_5=:un,
@@ -422,7 +440,11 @@ async def _upsert_odds(
                   dc_1x=:dc1x, dc_x2=:dcx2, dc_12=:dc12,
                   market_avg_home_win=:mah, market_avg_draw=:mad, market_avg_away_win=:maa,
                   market_avg_over_2_5=:mover, market_avg_under_2_5=:munder,
-                  fetched_at=:fetched_at
+                  fetched_at=:fetched_at,
+                  opening_home_win=COALESCE(odds.opening_home_win, :h),
+                  opening_draw=COALESCE(odds.opening_draw, :d),
+                  opening_away_win=COALESCE(odds.opening_away_win, :a),
+                  opening_fetched_at=COALESCE(odds.opening_fetched_at, :fetched_at)
             """
             ),
             odds_params,
@@ -463,6 +485,87 @@ async def _upsert_odds(
                 snapshots_saved += int(res_snap.rowcount or 0)
             except Exception:
                 snapshots_saved += 0
+        # ── Pinnacle odds: store as separate row for calibration ──
+        if _sync_pinnacle and any([pin_home, pin_draw, pin_away]):
+            pin_params = {
+                "fid": fixture_id,
+                "bid": settings.pinnacle_bookmaker_id,
+                "h": _qm(pin_home), "d": _qm(pin_draw), "a": _qm(pin_away),
+                "ov": _qm(pin_over), "un": _qm(pin_under),
+                "o15": _qm(pin_over_1_5), "u15": _qm(pin_under_1_5),
+                "o35": _qm(pin_over_3_5), "u35": _qm(pin_under_3_5),
+                "by": _qm(pin_btts_yes), "bn": _qm(pin_btts_no),
+                "dc1x": _qm(pin_dc_1x), "dcx2": _qm(pin_dc_x2), "dc12": _qm(pin_dc_12),
+                "mah": _qm(market_home), "mad": _qm(market_draw), "maa": _qm(market_away),
+                "mover": _qm(market_over), "munder": _qm(market_under),
+                "fetched_at": fetched_at,
+            }
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO odds(fixture_id, bookmaker_id, home_win, draw, away_win, over_2_5, under_2_5,
+                                     over_1_5, under_1_5, over_3_5, under_3_5,
+                                     btts_yes, btts_no,
+                                     dc_1x, dc_x2, dc_12,
+                                     market_avg_home_win, market_avg_draw, market_avg_away_win,
+                                     market_avg_over_2_5, market_avg_under_2_5,
+                                     fetched_at,
+                                     opening_home_win, opening_draw, opening_away_win, opening_fetched_at)
+                    VALUES(:fid, :bid, :h, :d, :a, :ov, :un,
+                           :o15, :u15, :o35, :u35,
+                           :by, :bn,
+                           :dc1x, :dcx2, :dc12,
+                           :mah, :mad, :maa, :mover, :munder,
+                           :fetched_at,
+                           :h, :d, :a, :fetched_at)
+                    ON CONFLICT (fixture_id, bookmaker_id) DO UPDATE SET
+                      home_win=:h, draw=:d, away_win=:a,
+                      over_2_5=:ov, under_2_5=:un,
+                      over_1_5=:o15, under_1_5=:u15,
+                      over_3_5=:o35, under_3_5=:u35,
+                      btts_yes=:by, btts_no=:bn,
+                      dc_1x=:dc1x, dc_x2=:dcx2, dc_12=:dc12,
+                      market_avg_home_win=:mah, market_avg_draw=:mad, market_avg_away_win=:maa,
+                      market_avg_over_2_5=:mover, market_avg_under_2_5=:munder,
+                      fetched_at=:fetched_at,
+                      opening_home_win=COALESCE(odds.opening_home_win, :h),
+                      opening_draw=COALESCE(odds.opening_draw, :d),
+                      opening_away_win=COALESCE(odds.opening_away_win, :a),
+                      opening_fetched_at=COALESCE(odds.opening_fetched_at, :fetched_at)
+                """
+                ),
+                pin_params,
+            )
+            # Pinnacle snapshot for historical closing line tracking
+            if not settings.backtest_mode:
+                pin_snap = dict(pin_params)
+                pin_snap["fetched_at"] = fetched_at
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO odds_snapshots(
+                          fixture_id, bookmaker_id, fetched_at,
+                          home_win, draw, away_win, over_2_5, under_2_5,
+                          over_1_5, under_1_5, over_3_5, under_3_5,
+                          btts_yes, btts_no,
+                          dc_1x, dc_x2, dc_12,
+                          market_avg_home_win, market_avg_draw, market_avg_away_win,
+                          market_avg_over_2_5, market_avg_under_2_5
+                        )
+                        VALUES(
+                          :fid, :bid, :fetched_at,
+                          :h, :d, :a, :ov, :un,
+                          :o15, :u15, :o35, :u35,
+                          :by, :bn,
+                          :dc1x, :dcx2, :dc12,
+                          :mah, :mad, :maa, :mover, :munder
+                        )
+                        ON CONFLICT DO NOTHING
+                        """
+                    ),
+                    pin_snap,
+                )
+
         fixtures_with_odds.add(fixture_id)
         await _rate_limit()
     return fixtures_with_odds, snapshots_saved
@@ -509,13 +612,18 @@ async def _refresh_odds(session: AsyncSession, fixture_ids: list[int]) -> tuple[
             continue
     groups_sorted = sorted(fixture_ids_by_group.keys())
 
+    # When syncing Pinnacle alongside primary, fetch ALL bookmakers (API Football
+    # rejects comma-separated bookmaker IDs). _upsert_odds extracts both by ID.
+    _need_pinnacle = settings.sync_pinnacle_odds and settings.pinnacle_bookmaker_id != settings.bookmaker_id
+    _target_bids: list[int] = [] if _need_pinnacle else [settings.bookmaker_id]
+
     for d, league_id, season in groups_sorted:
         stop_ids = fixture_ids_by_group.get((d, league_id, season)) or set()
         fetched_at = utcnow()
         data = await get_odds_by_date_paged(
             session,
             d.isoformat(),
-            [settings.bookmaker_id],
+            _target_bids,
             league_id=league_id,
             season=season,
             stop_fixture_ids=set(stop_ids),
@@ -541,7 +649,7 @@ async def _refresh_odds(session: AsyncSession, fixture_ids: list[int]) -> tuple[
     for fid in remaining:
         metric_lid = fid_to_league.get(int(fid)) if fid is not None else None
         fetched_at = utcnow()
-        data = await get_odds_by_fixture(session, fid, [settings.bookmaker_id], metric_league_id=metric_lid)
+        data = await get_odds_by_fixture(session, fid, _target_bids, metric_league_id=metric_lid)
         fx, snaps = await _upsert_odds(session, data, fetched_at, allowed_fixture_ids=allowed)
         fixtures_with_odds |= fx
         snapshots_saved += snaps
@@ -752,6 +860,48 @@ async def _sync_standings(session: AsyncSession) -> int:
     return updated
 
 
+async def _update_standings_history_incremental(session: AsyncSession) -> int:
+    """Incrementally update team_standings_history for recently finished fixtures.
+
+    Finds fixtures finished in the last 3 days that are missing from the
+    history table, then rebuilds standings for those (league, season) pairs
+    from scratch for the affected dates.  This keeps the history table
+    current without a full backfill.
+    """
+    from app.jobs.backfill_standings_history import run as _full_backfill
+
+    # Check if there are recent FT fixtures whose match_date is NOT yet in history
+    lid_list = ",".join(str(lid) for lid in settings.league_ids)
+    res = await session.execute(
+        text(f"""
+            SELECT DISTINCT f.league_id, f.season
+            FROM fixtures f
+            WHERE f.status IN ('FT', 'AET', 'PEN')
+              AND f.league_id IN ({lid_list})
+              AND f.home_goals IS NOT NULL
+              AND f.kickoff >= now() - INTERVAL '3 days'
+              AND NOT EXISTS (
+                SELECT 1 FROM team_standings_history h
+                WHERE h.team_id = f.home_team_id
+                  AND h.league_id = f.league_id
+                  AND h.season = f.season
+                  AND h.as_of_date = (f.kickoff AT TIME ZONE 'UTC')::date
+              )
+        """)
+    )
+    missing = res.fetchall()
+
+    if not missing:
+        return 0
+
+    # If there are gaps, run the full backfill (it's idempotent via upsert)
+    log.info("standings_history: %d league/season pairs need update, running backfill", len(missing))
+    result = await _full_backfill(session)
+    written = result.get("rows_written", 0)
+    log.info("standings_history: incremental update wrote %d rows", written)
+    return written
+
+
 async def _backfill_snapshots_from_odds(session: AsyncSession, fixture_ids: list[int]) -> int:
     if not fixture_ids:
         return 0
@@ -761,12 +911,18 @@ async def _backfill_snapshots_from_odds(session: AsyncSession, fixture_ids: list
             INSERT INTO odds_snapshots(
               fixture_id, bookmaker_id, fetched_at,
               home_win, draw, away_win, over_2_5, under_2_5,
+              over_1_5, under_1_5, over_3_5, under_3_5,
+              btts_yes, btts_no,
+              dc_1x, dc_x2, dc_12,
               market_avg_home_win, market_avg_draw, market_avg_away_win,
               market_avg_over_2_5, market_avg_under_2_5
             )
             SELECT
               o.fixture_id, o.bookmaker_id, o.fetched_at,
               o.home_win, o.draw, o.away_win, o.over_2_5, o.under_2_5,
+              o.over_1_5, o.under_1_5, o.over_3_5, o.under_3_5,
+              o.btts_yes, o.btts_no,
+              o.dc_1x, o.dc_x2, o.dc_12,
               o.market_avg_home_win, o.market_avg_draw, o.market_avg_away_win,
               o.market_avg_over_2_5, o.market_avg_under_2_5
             FROM odds o
@@ -1268,6 +1424,13 @@ async def run(session: AsyncSession, force_refresh: bool = False):
             stats_updated, stats_missing = await _sync_stats(session, settings.league_ids)
 
         standings_upserted = await _sync_standings(session) if settings.enable_standings else 0
+
+        # Keep team_standings_history up-to-date incrementally
+        if settings.enable_standings:
+            try:
+                await _update_standings_history_incremental(session)
+            except Exception as exc:
+                log.warning("standings_history incremental update failed: %s", exc)
 
         if settings.enable_injuries and ns_fixture_ids:
             res = await session.execute(

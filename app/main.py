@@ -31,6 +31,8 @@ from app.jobs import build_predictions, compute_indices, evaluate_results, sync_
 from app.jobs import maintenance
 from app.jobs import rebuild_elo
 from app.jobs import fit_dixon_coles
+from app.jobs import backfill_standings_history
+from app.jobs import auto_publish
 from app.core.timeutils import utcnow, ensure_aware_utc
 from app.services.elo_ratings import get_team_rating
 from app.services.api_football_quota import api_football_usage_since, quota_guard_decision, utc_day_window
@@ -57,6 +59,15 @@ RUN_NOW_LAST: dict[str, float] = {}
 PUBLIC_API_RATE: dict[str, list[float]] = {}
 RECENT_FIXTURE_REFRESH_LOCK = asyncio.Lock()
 RECENT_FIXTURE_REFRESH_LAST_AT: datetime | None = None
+# Dashboard KPIs should reflect post-roadmap-validation performance only.
+DASHBOARD_METRICS_EPOCH = datetime(2026, 3, 13, 0, 0, tzinfo=timezone.utc)
+# Roadmap milestone tracking epoch (same date, separate constant for clarity).
+ROADMAP_EPOCH = datetime(2026, 3, 13, 0, 0, tzinfo=timezone.utc)
+ROADMAP_TARGETS = {
+    "pinnacle_settled": 50,
+    "v3_features_settled": 100,
+    "stacking_settled": 150,
+}
 
 
 def _file_sha256_hex(path: Path) -> str | None:
@@ -446,6 +457,9 @@ async def lifespan(_: FastAPI):
         async def _scheduled_fit_dixon_coles():
             await _run_job("fit_dixon_coles", fit_dixon_coles.run, triggered_by="scheduler")
 
+        async def _scheduled_auto_publish():
+            await _run_job("auto_publish", auto_publish.run, triggered_by="scheduler")
+
         scheduler.add_job(
             _scheduled_sync_data,
             CronTrigger.from_crontab(settings.sync_data_cron),
@@ -502,6 +516,14 @@ async def lifespan(_: FastAPI):
             coalesce=True,
             misfire_grace_time=300,
         )
+        scheduler.add_job(
+            _scheduled_auto_publish,
+            CronTrigger.from_crontab(settings.job_auto_publish_cron),
+            id="auto_publish",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
         if settings.snapshot_autofill_enabled:
             scheduler.add_job(
                 _snapshot_autofill_tick,
@@ -535,7 +557,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["GET"],
-    allow_headers=["*"],
+    allow_headers=["X-Admin-Token", "X-Admin-Actor", "Content-Type"],
     expose_headers=["X-Total-Count"],
 )
 
@@ -1064,6 +1086,8 @@ async def _run_single(job_name: str, triggered_by: str | None = None, meta: Opti
         "rebuild_elo": rebuild_elo.run,
         "quality_report": quality_report.run,
         "fit_dixon_coles": fit_dixon_coles.run,
+        "backfill_standings_history": backfill_standings_history.run,
+        "auto_publish": auto_publish.run,
     }
     job_fn = jobs.get(job_name)
     if not job_fn:
@@ -1076,7 +1100,7 @@ async def api_run_now(
     request: Request,
     job: str = Query(
         "full",
-        description="full | sync_data | compute_indices | build_predictions | evaluate_results | maintenance | rebuild_elo | quality_report",
+        description="full | sync_data | compute_indices | build_predictions | evaluate_results | maintenance | rebuild_elo | quality_report | backfill_standings_history | auto_publish",
     ),
     _: None = Depends(_require_admin),
     x_admin_actor: str | None = Header(default=None, alias="X-Admin-Actor"),
@@ -2909,7 +2933,7 @@ async def api_market_stats(
             "roi": round(roi * 100, 2) if settled else 0.0,
             "total_profit": float(profit),
         }
-    return {"data": markets}
+    return markets
 
 
 @app.get("/api/v1/info/stats")
@@ -3084,8 +3108,8 @@ async def api_dashboard(
     session: AsyncSession = Depends(get_session),
 ):
     """Enhanced dashboard metrics with trends and KPIs"""
-    cutoff = max(utcnow() - timedelta(days=days), STATS_EPOCH)
-    prev_cutoff = max(cutoff - timedelta(days=days), STATS_EPOCH)
+    cutoff = max(utcnow() - timedelta(days=days), DASHBOARD_METRICS_EPOCH)
+    prev_cutoff = max(cutoff - timedelta(days=days), DASHBOARD_METRICS_EPOCH)
 
     # Current period metrics
     current_stats = await session.execute(
@@ -3195,6 +3219,8 @@ async def api_dashboard(
 
     return {
         "period_days": days,
+        "cutoff": cutoff.isoformat(),
+        "epoch_cutoff": DASHBOARD_METRICS_EPOCH.isoformat(),
         "kpis": {
             "total_bets": {
                 "value": current_total,
@@ -3239,6 +3265,124 @@ async def api_dashboard(
             "profit_factor": profit_factor,
             "profit_factor_note": profit_factor_note,
         }
+    }
+
+
+@app.get("/api/v1/roadmap-progress")
+async def api_roadmap_progress(
+    _: None = Depends(_require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Roadmap milestone progress since ROADMAP_EPOCH (2026-03-13)."""
+    now = utcnow()
+
+    # 1. Pinnacle settled pairs: settled predictions that have Pinnacle odds
+    #    (this is what the calibrator actually needs to train)
+    pinnacle_res = await session.execute(
+        text("""
+            SELECT COUNT(*) AS cnt
+            FROM predictions p
+            JOIN odds pin ON pin.fixture_id = p.fixture_id AND pin.bookmaker_id = :bid
+            WHERE p.status IN ('WIN', 'LOSS')
+              AND p.selection_code != 'SKIP'
+              AND p.feature_flags ->> 'p_home' IS NOT NULL
+              AND pin.home_win IS NOT NULL
+              AND pin.draw IS NOT NULL
+              AND pin.away_win IS NOT NULL
+        """).bindparams(
+            bindparam("bid", type_=Integer()),
+        ),
+        {"bid": settings.pinnacle_bookmaker_id},
+    )
+    pinnacle_count = int(pinnacle_res.scalar_one_or_none() or 0)
+
+    # Also track raw Pinnacle odds collected (informational)
+    pinnacle_raw_res = await session.execute(
+        text("""
+            SELECT COUNT(DISTINCT fixture_id) AS cnt
+            FROM odds
+            WHERE bookmaker_id = :bid
+              AND fetched_at >= :epoch
+        """).bindparams(
+            bindparam("bid", type_=Integer()),
+            bindparam("epoch", type_=SADateTime(timezone=True)),
+        ),
+        {"bid": settings.pinnacle_bookmaker_id, "epoch": ROADMAP_EPOCH},
+    )
+    pinnacle_raw_count = int(pinnacle_raw_res.scalar_one_or_none() or 0)
+
+    # 2. V3 features settled: settled predictions with v3 keys present
+    v3_res = await session.execute(
+        text("""
+            SELECT COUNT(*) AS cnt
+            FROM predictions
+            WHERE settled_at IS NOT NULL
+              AND settled_at >= :epoch
+              AND status IN ('WIN', 'LOSS')
+              AND feature_flags ->> 'odds_movement_home' IS NOT NULL
+        """).bindparams(
+            bindparam("epoch", type_=SADateTime(timezone=True)),
+        ),
+        {"epoch": ROADMAP_EPOCH},
+    )
+    v3_count = int(v3_res.scalar_one_or_none() or 0)
+
+    # 3. Stacking settled: settled predictions with prob_source=stacking
+    stacking_res = await session.execute(
+        text("""
+            SELECT COUNT(*) AS cnt
+            FROM predictions
+            WHERE settled_at IS NOT NULL
+              AND settled_at >= :epoch
+              AND status IN ('WIN', 'LOSS')
+              AND feature_flags ->> 'prob_source' = 'stacking'
+        """).bindparams(
+            bindparam("epoch", type_=SADateTime(timezone=True)),
+        ),
+        {"epoch": ROADMAP_EPOCH},
+    )
+    stacking_count = int(stacking_res.scalar_one_or_none() or 0)
+
+    # Calculate estimated completion dates via linear extrapolation
+    days_elapsed = max((now - ROADMAP_EPOCH).total_seconds() / 86400, 0.01)
+
+    def _estimate(current: int, target: int) -> str | None:
+        if current >= target:
+            return None
+        if current == 0:
+            return None
+        rate = current / days_elapsed
+        days_to_go = (target - current) / rate
+        return (now + timedelta(days=days_to_go)).date().isoformat()
+
+    milestones = {}
+    for key, (count, target) in {
+        "pinnacle_settled": (pinnacle_count, ROADMAP_TARGETS["pinnacle_settled"]),
+        "v3_features_settled": (v3_count, ROADMAP_TARGETS["v3_features_settled"]),
+        "stacking_settled": (stacking_count, ROADMAP_TARGETS["stacking_settled"]),
+    }.items():
+        pct = min(round(count / target * 100, 1), 100.0) if target > 0 else 0.0
+        milestones[key] = {
+            "current": count,
+            "target": target,
+            "pct": pct,
+            "reached": count >= target,
+            "estimated_completion": _estimate(count, target),
+        }
+
+    # Add raw Pinnacle odds count as informational sub-metric
+    milestones["pinnacle_settled"]["collected"] = pinnacle_raw_count
+
+    overall_pct = round(
+        sum(m["pct"] for m in milestones.values()) / len(milestones), 1
+    )
+
+    return {
+        "epoch": ROADMAP_EPOCH.isoformat(),
+        "days_elapsed": round(days_elapsed, 1),
+        "milestones": milestones,
+        "overall_pct": overall_pct,
+        "all_reached": all(m["reached"] for m in milestones.values()),
     }
 
 
@@ -4303,26 +4447,27 @@ async def public_leagues(
     league_ids = settings.league_ids or []
     if not league_ids:
         return []
-    placeholders = ", ".join(str(lid) for lid in league_ids)
     res = await session.execute(
-        text(f"""
+        text("""
             SELECT DISTINCT l.id, l.name, l.country, l.logo_url
             FROM leagues l
-            WHERE l.id IN ({placeholders})
+            WHERE l.id IN (SELECT unnest(CAST(:ids AS integer[])))
             ORDER BY l.name
-        """)
+        """),
+        {"ids": league_ids},
     )
     rows = res.fetchall()
     if not rows:
         res2 = await session.execute(
-            text(f"""
+            text("""
                 SELECT DISTINCT f.league_id AS id, l.name, l.country, l.logo_url
                 FROM fixtures f
                 LEFT JOIN leagues l ON l.id = f.league_id
-                WHERE f.league_id IN ({placeholders})
+                WHERE f.league_id IN (SELECT unnest(CAST(:ids AS integer[])))
                 GROUP BY f.league_id, l.name, l.country, l.logo_url
                 ORDER BY l.name NULLS LAST
-            """)
+            """),
+            {"ids": league_ids},
         )
         rows = res2.fetchall()
     return [

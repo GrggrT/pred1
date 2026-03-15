@@ -20,15 +20,21 @@ htmlcov/
 
 # Dev artifacts
 test_*.html
+test_*.png
 *.log
 quality_what_if_report.txt
 
 # Ablation results (keep .gitkeep)
 results/*.json
 
-# Claude Code settings
+# Claude Code settings & working dirs
 .claude/settings.local.json
 .claude/settings.json
+.claude/worktrees/
+.claude/agent-memory-local/
+.claude/projects/
+.claude/launch.json
+.claude/plans/
 
 # AI tool working directories
 codex_cabinet/

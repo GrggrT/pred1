@@ -12,6 +12,38 @@
 
 ---
 
+## [D034] Stacking v3 deferred (2026-03-13)
+- **Контекст**: V3 stacking (30 features) запланирован в roadmap Phase 3. Включает CMP(4), Market(7), Performance(4), Context(3) features.
+- **Варианты**: (A) retrain v3 now, (B) accumulate data first, (C) stay on v2
+- **Решение**: Вариант B — 0 predictions с v3 features. CMP features disabled (D033). Market/Performance/Context features вычисляются в build_predictions, но нужно 1-2 недели накопления + settling.
+- **Обоснование**: Нет смысла тренировать без данных. V2 (val_RPS=0.1886) оптимален для текущего dataset. Retrain после 100+ settled с v3 features.
+- **Статус**: Принято
+
+## [D033] CMP-DC disabled after ablation (2026-03-13)
+- **Контекст**: COM-Poisson DC model (Phase 2 roadmap) failed RPS ablation gate. 0/6 leagues improved. Global ΔRPS = +0.00042 (CMP worse).
+- **Варианты**: (A) enable CMP-DC anyway, (B) disable, (C) tune parameters further
+- **Решение**: Вариант B — `DC_USE_CMP=false`. CMP probs fall back to DC-goals probs in build_predictions.
+- **Обоснование**:
+  - Fitted nu0 < 1.0 for EPL (0.917) and Bundesliga (0.800) indicates overdispersion, contradicting underdispersion hypothesis
+  - La Liga (nu0=1.101, highest nu) performed worst (+0.00221 ΔRPS)
+  - Football goals after DC conditioning are well-modeled by Poisson (nu=1)
+  - CMP adds computational cost (log_Z series evaluation) without RPS benefit
+- **Данные**: Ablation on 1189 fixtures across 6 leagues with fitted CMP params (3 leagues) and defaults (3 leagues)
+- **Статус**: Принято
+
+## [D032] Primeira Liga disabled (2026-03-10)
+- **Контекст**: Liga Portugal (ID 94): 8 settled, ROI -57.5%, win rate 25%. Системная просадка.
+- **Варианты**: (A) повысить EV threshold, (B) отключить prediction generation, (C) убрать из sync
+- **Решение**: Вариант B — `DISABLED_PREDICTION_LEAGUES=94`. Sync продолжается, predictions не генерируются.
+- **Обоснование**: Сохраняем данные для будущего анализа/улучшения модели. Реактивация возможна при улучшении калибровки.
+- **Статус**: Принято
+
+## [D031] Logistic fallback removal confirmed (2026-03-10)
+- **Контекст**: 34 settled predictions с `prob_source=logistic`, ROI -8.2%. Тянут метрики вниз.
+- **Решение**: Подтверждено, что logistic fallback уже удалён из кода (Task 15). Legacy `.env` флаги вычищены.
+- **Обоснование**: Production pipeline: stacking → dc_only → poisson_fallback. Logistic не должен присутствовать ни на каком уровне.
+- **Статус**: Принято
+
 ## [D030] Отключение убыточных рынков (2026-03-01)
 - **Контекст**: Production report #001, 304 settled predictions.
 - **Решение**: Отключить TOTAL_1_5, TOTAL_3_5, BTTS. Сузить MAX_ODD с 4.00 до 2.50.

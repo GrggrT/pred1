@@ -4,6 +4,41 @@
 
 ---
 
+## Сессия 22 — 2026-03-13
+**Задание**: Task 22 — Roadmap validation (поэтапная валидация всех компонентов)
+**Выполнено**:
+1. **Step 1 PASSED**: Миграции 0035-0037 применены. 300 тестов прошли. Compilation clean.
+2. **Step 2 PASSED**: Backfill standings: 21,135 записей, 6 лиг, LATERAL join работает (avg_rank_diff 6.0-6.7).
+3. **Step 3 FAILED**: CMP-DC ablation: 0/6 лиг улучшились. Global ΔRPS = +0.00042 (CMP хуже). Fitted nu0 < 1.0 для EPL и Bundesliga (overdispersion). **DC_USE_CMP=false**.
+4. **Step 4 PARTIAL**: V2 stacking подтверждён (val_RPS=0.1886). V3 features: 0 predictions с новыми фичами, retrain отложен.
+5. **Step 5 COMPLETED**: Production: DC_USE_CMP=false, SYNC_PINNACLE_ODDS=true, USE_PINNACLE_CALIB=false, ENABLE_KELLY=false.
+6. **Bugs fixed**: API Football bookmaker param (comma→empty list), com_poisson.py int conversion (2 places).
+7. **Reports**: validation_report_roadmap.md создан. .architect/ обновлён.
+
+**Ключевой вывод**: CMP-DC (COM-Poisson) не улучшает предсказания. Football goals после DC conditioning хорошо описываются стандартным Poisson (nu=1). Остальные компоненты roadmap (standings, Pinnacle sync, opening odds, dual CLV) работают корректно.
+
+**Следующий шаг**: Накопить Pinnacle odds (2-4 недели), затем train Pinnacle calibrator. Накопить v3 features, затем retrain stacking.
+
+---
+
+## Сессия 21 — 2026-03-10
+**Задание**: Task 21 — Убрать logistic fallback + Primeira Liga
+**Выполнено**:
+1. **Logistic fallback**: подтверждено, что уже удалён из кода в Task 15. Вычищены legacy `.env` флаги (`USE_LOGISTIC_PROBS`, `USE_HYBRID_PROBS`, `HYBRID_WEIGHTS`).
+2. **Primeira Liga (ID 94)**: добавлен `DISABLED_PREDICTION_LEAGUES` config. `build_predictions.py` скипает fixtures для disabled leagues (и 1X2, и secondary markets). Data sync продолжается.
+3. **Тесты**: 6 новых тестов в `test_disabled_leagues.py` — config parsing + AST verification no logistic in code.
+4. **Документация**: обновлены CHANGELOG, DECISIONS (D031, D032), SESSION_LOG, STATE, BACKLOG.
+
+**Production status (51 stacking settled)**:
+- Stacking: ROI +0.8%, RPS 0.1943, win rate 56.9%
+- Logistic (legacy, 34 settled): ROI -8.2% — больше не генерируются
+- Liga Portugal (8 settled): ROI -57.5% — predictions disabled
+
+**Результат**: Pipeline очищен от legacy logistic, убыточная лига отключена
+**Следующий шаг**: Checkpoint при 100+ stacking settled
+
+---
+
 ## Сессия 20 — 2026-03-01
 **Задание**: Task 20 — Post-monitoring конфигурация
 **Выполнено**:

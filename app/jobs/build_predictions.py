@@ -17,8 +17,10 @@ from app.services.elo_ratings import apply_elo_from_fixtures, get_team_rating, D
 from app.services.league_model_params import estimate_dixon_coles_rho
 from app.services.odds_utils import remove_overround_basic, remove_overround_binary
 from app.services.dixon_coles import predict_lambda_mu as dc_predict_lambda_mu
+from app.services.com_poisson import match_probs_cmp_dc, nu_from_balance
 from app.services.stacking import load_stacking_model
 from app.services.calibration import load_calibrator
+from app.services.pinnacle_calibration import load_pinnacle_calibrator
 
 log = get_logger("jobs.build_predictions")
 
@@ -126,13 +128,13 @@ async def _load_dc_global_params(
     as_of_date,
     param_source: str = "goals",
 ) -> Dict[str, float] | None:
-    """Load DC global params (HA, rho, xi) for a league.
+    """Load DC global params (HA, rho, xi, nu0, nu1) for a league.
 
-    Returns dict with keys: home_advantage, rho, xi, or None if not found.
+    Returns dict with keys: home_advantage, rho, xi, nu0, nu1, or None if not found.
     """
     res = await session.execute(
         text("""
-            SELECT home_advantage, rho, xi
+            SELECT home_advantage, rho, xi, nu0, nu1
             FROM dc_global_params
             WHERE league_id = :lid AND season = :season AND param_source = :src
               AND as_of_date = (
@@ -150,6 +152,8 @@ async def _load_dc_global_params(
         "home_advantage": float(row.home_advantage),
         "rho": float(row.rho),
         "xi": float(row.xi),
+        "nu0": float(row.nu0) if getattr(row, "nu0", None) is not None else None,
+        "nu1": float(row.nu1) if getattr(row, "nu1", None) is not None else None,
     }
 
 
@@ -280,8 +284,21 @@ async def _target_rows(session: AsyncSession):
             os.dc_1x, os.dc_x2, os.dc_12,
             os.market_avg_home_win, os.market_avg_draw, os.market_avg_away_win,
             os.market_avg_over_2_5, os.market_avg_under_2_5,
-            os.fetched_at
+            os.fetched_at,
+            open_snap.home_win  AS opening_home_win,
+            open_snap.draw      AS opening_draw,
+            open_snap.away_win  AS opening_away_win
           FROM odds_snapshots os
+          LEFT JOIN LATERAL (
+            SELECT os2.home_win, os2.draw, os2.away_win
+            FROM odds_snapshots os2
+            WHERE os2.fixture_id=f.id
+              AND os2.bookmaker_id=:bid
+              AND os2.fetched_at < f.kickoff
+              AND os2.home_win IS NOT NULL
+            ORDER BY os2.fetched_at ASC
+            LIMIT 1
+          ) open_snap ON TRUE
           WHERE os.fixture_id=f.id
             AND os.bookmaker_id=:bid
             AND os.fetched_at < f.kickoff
@@ -310,11 +327,24 @@ async def _target_rows(session: AsyncSession):
                    o.dc_1x, o.dc_x2, o.dc_12,
                    o.market_avg_home_win, o.market_avg_draw, o.market_avg_away_win,
                    o.market_avg_over_2_5, o.market_avg_under_2_5,
-                   o.fetched_at
+                   o.fetched_at,
+                   o.opening_home_win, o.opening_draw, o.opening_away_win
             FROM fixtures f
             JOIN match_indices mi ON mi.fixture_id=f.id
-            LEFT JOIN team_standings sh ON sh.team_id=f.home_team_id AND sh.league_id=f.league_id AND sh.season=f.season
-            LEFT JOIN team_standings sa ON sa.team_id=f.away_team_id AND sa.league_id=f.league_id AND sa.season=f.season
+            LEFT JOIN LATERAL (
+              SELECT h.rank, h.points
+              FROM team_standings_history h
+              WHERE h.team_id=f.home_team_id AND h.league_id=f.league_id
+                AND h.season=f.season AND h.as_of_date < f.kickoff::date
+              ORDER BY h.as_of_date DESC LIMIT 1
+            ) sh ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT h.rank, h.points
+              FROM team_standings_history h
+              WHERE h.team_id=f.away_team_id AND h.league_id=f.league_id
+                AND h.season=f.season AND h.as_of_date < f.kickoff::date
+              ORDER BY h.as_of_date DESC LIMIT 1
+            ) sa ON TRUE
             {odds_join}
             WHERE (:bt = true OR f.status='NS')
               AND f.league_id IN (SELECT unnest(CAST(:lids AS integer[])))
@@ -801,7 +831,7 @@ async def run(session: AsyncSession):
         else:
             log.warning("build_predictions USE_STACKING=true but no trained model found; using DC-only fallback")
 
-    # Load Dirichlet calibrator if enabled
+    # Load calibrators if enabled
     dirichlet_calibrator = None
     if settings.use_dirichlet_calib:
         dirichlet_calibrator = await load_calibrator(session)
@@ -809,6 +839,14 @@ async def run(session: AsyncSession):
             log.info("build_predictions Dirichlet calibrator loaded")
         else:
             log.warning("build_predictions USE_DIRICHLET_CALIB=true but no trained calibrator found")
+
+    pinnacle_calibrator = None
+    if getattr(settings, "use_pinnacle_calib", False):
+        pinnacle_calibrator = await load_pinnacle_calibrator(session)
+        if pinnacle_calibrator is not None:
+            log.info("build_predictions Pinnacle calibrator loaded")
+        else:
+            log.warning("build_predictions USE_PINNACLE_CALIB=true but no trained calibrator found")
 
     # Log per-league controls
     league_1x2_list = settings.league_1x2_enabled
@@ -826,8 +864,9 @@ async def run(session: AsyncSession):
         return
 
     log.info("build_predictions fixtures=%s", len(rows))
-    # Avoid leakage from future standings/injuries in backtest calibration runs.
-    use_standings = bool(settings.enable_standings) and not settings.backtest_mode
+    # Standings now use team_standings_history with temporal lookup (as_of_date < kickoff),
+    # so they are safe in backtest mode — no future data leakage.
+    use_standings = bool(settings.enable_standings)
     use_injuries = bool(settings.enable_injuries) and not settings.backtest_mode
     league_cache: Dict[Tuple[int, int, str], Tuple[Decimal, Decimal, Decimal, Decimal]] = {}
     elo_cache: Dict[int, Decimal] = {}
@@ -864,9 +903,21 @@ async def run(session: AsyncSession):
     dc_global_cache: Dict[Tuple[int, int], Dict[str, float] | None] = {}
     dc_xg_team_cache: Dict[Tuple[int, int], Dict[int, Tuple[float, float]]] = {}
     dc_xg_global_cache: Dict[Tuple[int, int], Dict[str, float] | None] = {}
-    log.info("build_predictions DC core active (dc_use_xg=%s)", use_dc_xg)
+    dc_cmp_team_cache: Dict[Tuple[int, int], Dict[int, Tuple[float, float]]] = {}
+    dc_cmp_global_cache: Dict[Tuple[int, int], Dict[str, float] | None] = {}
+    log.info("build_predictions DC core active (dc_use_xg=%s dc_use_cmp=%s)",
+             use_dc_xg, getattr(settings, "dc_use_cmp", False))
+
+    disabled_leagues = settings.disabled_prediction_leagues
+    if disabled_leagues:
+        log.info("build_predictions disabled leagues for predictions: %s", disabled_leagues)
 
     for row in rows:
+        if int(row.league_id) in disabled_leagues:
+            log.info("skip_disabled_league fixture=%s league=%s", row.id, row.league_id)
+            skips += 1
+            continue
+
         base_home, base_away, league_draw_freq, dc_rho = await _league_baseline_cache(
             session, league_cache, row.league_id, row.season, row.kickoff
         )
@@ -1040,14 +1091,137 @@ async def run(session: AsyncSession):
                 )
                 dc_xg_available = True
 
+        # CMP-DC predictions (uses CMP params if available, else falls back to DC-goals with nu=1)
+        p_home_cmp = p_home_dc
+        p_draw_cmp = p_draw_dc
+        p_away_cmp = p_away_dc
+        cmp_nu = 1.0
+        use_cmp = bool(getattr(settings, "dc_use_cmp", False))
+        if use_cmp and dc_core_used:
+            if dc_key not in dc_cmp_team_cache:
+                dc_cmp_team_cache[dc_key] = await _load_dc_team_params(
+                    session, dc_key[0], dc_key[1], kickoff_date, param_source="cmp",
+                )
+                dc_cmp_global_cache[dc_key] = await _load_dc_global_params(
+                    session, dc_key[0], dc_key[1], kickoff_date, param_source="cmp",
+                )
+            cmp_teams = dc_cmp_team_cache.get(dc_key, {})
+            cmp_globals = dc_cmp_global_cache.get(dc_key)
+            home_cmp = cmp_teams.get(int(row.home_team_id))
+            away_cmp = cmp_teams.get(int(row.away_team_id))
+            if home_cmp and away_cmp and cmp_globals:
+                att_h_cmp, def_h_cmp = home_cmp
+                att_a_cmp, def_a_cmp = away_cmp
+                cmp_ha = cmp_globals["home_advantage"]
+                cmp_rho = cmp_globals.get("rho", 0.0)
+                cmp_nu0 = float(cmp_globals.get("nu0") or 1.1)
+                cmp_nu1 = float(cmp_globals.get("nu1") or 0.1)
+                # Compute competitive-balance nu
+                strength_diff = abs(
+                    (att_h_cmp + def_a_cmp) - (att_a_cmp + def_h_cmp)
+                )
+                cmp_nu = nu_from_balance(strength_diff, cmp_nu0, cmp_nu1)
+                lam_cmp, mu_cmp = dc_predict_lambda_mu(
+                    att_h_cmp, def_h_cmp, att_a_cmp, def_a_cmp, cmp_ha,
+                )
+                lam_cmp_d = max(LAMBDA_EPS, q_money(D(lam_cmp)))
+                mu_cmp_d = max(LAMBDA_EPS, q_money(D(mu_cmp)))
+                p_home_cmp, p_draw_cmp, p_away_cmp = match_probs_cmp_dc(
+                    lam_cmp_d, mu_cmp_d, nu=cmp_nu,
+                    rho=D(str(cmp_rho)), k_max=10,
+                )
+
         # Fair odds (needed before stacking)
         fair_home, fair_draw, fair_away = remove_overround_basic(
             row.home_win, row.draw, row.away_win
         )
 
+        # === Compute extended features for stacking v3 ===
+        # A. Market features
+        _odds_movement_h = 0.0
+        _odds_movement_d = 0.0
+        _odds_movement_a = 0.0
+        _overround = 0.0
+        if row.home_win and row.draw and row.away_win:
+            _overround = float(
+                D(1) / D(str(row.home_win)) + D(1) / D(str(row.draw)) + D(1) / D(str(row.away_win)) - D(1)
+            )
+        # Odds movement: opening → current (if opening available)
+        open_h = getattr(row, "opening_home_win", None)
+        open_d = getattr(row, "opening_draw", None)
+        open_a = getattr(row, "opening_away_win", None)
+        if open_h and open_d and open_a and row.home_win and row.draw and row.away_win:
+            try:
+                _odds_movement_h = float(D(1) / D(str(row.home_win)) - D(1) / D(str(open_h)))
+                _odds_movement_d = float(D(1) / D(str(row.draw)) - D(1) / D(str(open_d)))
+                _odds_movement_a = float(D(1) / D(str(row.away_win)) - D(1) / D(str(open_a)))
+            except Exception:
+                pass
+
+        # Market disagreement: model prob vs fair implied prob
+        _disagree_h = float(p_home_dc) - (float(fair_home) if fair_home else 0.0)
+        _disagree_d = float(p_draw_dc) - (float(fair_draw) if fair_draw else 0.0)
+        _disagree_a = float(p_away_dc) - (float(fair_away) if fair_away else 0.0)
+
+        # B. Performance features from team history
+        home_hist = team_history.get(int(row.home_team_id), [])
+        away_hist = team_history.get(int(row.away_team_id), [])
+
+        def _xg_overperformance(hist: list, n: int = 10) -> float:
+            """Actual goals minus xG over last n matches (mean-reversion signal)."""
+            vals = []
+            for h in hist[:n]:
+                gf = getattr(h, "goals_for", None) or getattr(h, "val_for", None)
+                xgf = getattr(h, "xg_for", None)
+                if gf is not None and xgf is not None:
+                    vals.append(float(gf) - float(xgf))
+            return sum(vals) / len(vals) if vals else 0.0
+
+        def _form_trend(hist: list, n: int = 10) -> float:
+            """Slope of points per game over last n matches (linear regression)."""
+            results = []
+            for h in hist[:n]:
+                gf = getattr(h, "goals_for", None) or getattr(h, "val_for", None)
+                ga = getattr(h, "goals_against", None) or getattr(h, "val_against", None)
+                if gf is not None and ga is not None:
+                    gf_f, ga_f = float(gf), float(ga)
+                    pts = 3.0 if gf_f > ga_f else (1.0 if gf_f == ga_f else 0.0)
+                    results.append(pts)
+            if len(results) < 3:
+                return 0.0
+            # Linear regression slope: y = a + b*x
+            n_pts = len(results)
+            x_mean = (n_pts - 1) / 2.0
+            y_mean = sum(results) / n_pts
+            num = sum((i - x_mean) * (results[i] - y_mean) for i in range(n_pts))
+            den = sum((i - x_mean) ** 2 for i in range(n_pts))
+            return num / den if den > 0 else 0.0
+
+        _home_xg_overperf = _xg_overperformance(home_hist, 10)
+        _away_xg_overperf = _xg_overperformance(away_hist, 10)
+        _home_form_trend = _form_trend(home_hist, 10)
+        _away_form_trend = _form_trend(away_hist, 10)
+
+        # C. Context features
+        _standings_pts_diff = 0.0
+        _standings_rank_diff = 0.0
+        if use_standings and hasattr(row, "home_points") and hasattr(row, "away_points"):
+            try:
+                _standings_pts_diff = float(int(row.home_points or 0) - int(row.away_points or 0))
+                _standings_rank_diff = float(int(row.away_rank or 0) - int(row.home_rank or 0))
+            except Exception:
+                pass
+
+        _rest_diff = 0.0
+        hr = getattr(row, "home_rest_hours", None)
+        ar = getattr(row, "away_rest_hours", None)
+        if hr is not None and ar is not None:
+            _rest_diff = float(int(hr) - int(ar))
+
         # === Step 2: Model selection (Stacking → DC-only → Poisson fallback) ===
         if stacking_model is not None and dc_core_used:
             stacking_features = {
+                # Original 13 features
                 "p_home_poisson": float(p_home_poisson),
                 "p_draw_poisson": float(p_draw_poisson),
                 "p_away_poisson": float(p_away_poisson),
@@ -1061,6 +1235,28 @@ async def run(session: AsyncSession):
                 "fair_home": float(fair_home) if fair_home is not None else 0.0,
                 "fair_draw": float(fair_draw) if fair_draw is not None else 0.0,
                 "fair_away": float(fair_away) if fair_away is not None else 0.0,
+                # CMP-DC features (Phase 2)
+                "p_home_cmp": float(p_home_cmp),
+                "p_draw_cmp": float(p_draw_cmp),
+                "p_away_cmp": float(p_away_cmp),
+                "cmp_nu": cmp_nu,
+                # Market features (Phase 3)
+                "odds_movement_home": _odds_movement_h,
+                "odds_movement_draw": _odds_movement_d,
+                "odds_movement_away": _odds_movement_a,
+                "overround": _overround,
+                "disagree_home": _disagree_h,
+                "disagree_draw": _disagree_d,
+                "disagree_away": _disagree_a,
+                # Performance features (Phase 3)
+                "xg_overperf_home": _home_xg_overperf,
+                "xg_overperf_away": _away_xg_overperf,
+                "form_trend_home": _home_form_trend,
+                "form_trend_away": _away_form_trend,
+                # Context features (Phase 3)
+                "standings_pts_diff": _standings_pts_diff,
+                "standings_rank_diff": _standings_rank_diff,
+                "rest_diff": _rest_diff,
             }
             p_home, p_draw, p_away = stacking_model.predict(stacking_features)
             prob_source = "stacking"
@@ -1073,12 +1269,15 @@ async def run(session: AsyncSession):
             p_home, p_draw, p_away = p_home_poisson, p_draw_poisson, p_away_poisson
             prob_source = "poisson_fallback"
 
-        # === Step 3: Calibration (optional Dirichlet) ===
+        # === Step 3: Calibration (Pinnacle preferred, Dirichlet fallback) ===
         p_home_pre_calib = p_home
         p_draw_pre_calib = p_draw
         p_away_pre_calib = p_away
         calibration_method = "none"
-        if settings.use_dirichlet_calib and dirichlet_calibrator is not None:
+        if pinnacle_calibrator is not None:
+            p_home, p_draw, p_away = pinnacle_calibrator.calibrate_single(p_home, p_draw, p_away)
+            calibration_method = "pinnacle"
+        elif settings.use_dirichlet_calib and dirichlet_calibrator is not None:
             p_home, p_draw, p_away = dirichlet_calibrator.calibrate_single(p_home, p_draw, p_away)
             calibration_method = "dirichlet"
         probs = {"HOME_WIN": p_home, "DRAW": p_draw, "AWAY_WIN": p_away}
@@ -1151,11 +1350,30 @@ async def run(session: AsyncSession):
             "backtest": bool(settings.backtest_mode),
             "run_date": settings.backtest_current_date,
             "bt_kind": (settings.backtest_kind or "pseudo").strip().lower(),
+            # v3 extended features for stacking retraining
+            "p_home_cmp": float(p_home_cmp),
+            "p_draw_cmp": float(p_draw_cmp),
+            "p_away_cmp": float(p_away_cmp),
+            "cmp_nu": cmp_nu,
+            "odds_movement_home": _odds_movement_h,
+            "odds_movement_draw": _odds_movement_d,
+            "odds_movement_away": _odds_movement_a,
+            "overround": _overround,
+            "disagree_home": _disagree_h,
+            "disagree_draw": _disagree_d,
+            "disagree_away": _disagree_a,
+            "xg_overperf_home": _home_xg_overperf,
+            "xg_overperf_away": _away_xg_overperf,
+            "form_trend_home": _home_form_trend,
+            "form_trend_away": _away_form_trend,
+            "standings_pts_diff": _standings_pts_diff,
+            "standings_rank_diff": _standings_rank_diff,
+            "rest_diff": _rest_diff,
         }
         if use_standings:
             try:
                 feature_flags["standings_points_diff"] = int((row.home_points or 0) - (row.away_points or 0))
-                feature_flags["standings_rank_diff"] = int((row.away_rank or 0) - (row.home_rank or 0))
+                feature_flags["standings_rank_diff_raw"] = int((row.away_rank or 0) - (row.home_rank or 0))
             except Exception:
                 pass
         goal_variance = q_xg(lam_home + lam_away)
@@ -1173,6 +1391,17 @@ async def run(session: AsyncSession):
             effective_threshold = q_ev(base_threshold - D("0.01"))
         else:
             effective_threshold = base_threshold
+
+        # Market timing adjustment: lower threshold when high model-market disagreement
+        # suggests the market hasn't fully adjusted to fundamentals yet.
+        # Only when odds movement hasn't already shifted against us.
+        max_disagree = max(abs(_disagree_h), abs(_disagree_d), abs(_disagree_a))
+        max_movement = max(abs(_odds_movement_h), abs(_odds_movement_d), abs(_odds_movement_a))
+        if max_disagree > 0.06 and max_movement < 0.04:
+            # High disagreement + low movement = good timing — reduce threshold slightly
+            timing_bonus = min(D(str(max_disagree)) * D("0.15"), D("0.02"))
+            effective_threshold = q_ev(effective_threshold - timing_bonus)
+            feature_flags["timing_bonus"] = float(timing_bonus)
         feature_flags["effective_threshold"] = float(effective_threshold)
 
         # Per-league 1X2 bet enablement check

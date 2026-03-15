@@ -70,6 +70,12 @@
   var _prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var _numFmt = typeof Intl !== 'undefined' ? new Intl.NumberFormat('ru-RU') : null;
   var _cc = null;
+  var _analyticsChartData = null;
+  var resultsAllData = [];
+  var resultsLeagueFilter = null;
+  var resultsMarketFilter = 'all';
+  var resultsDisplayCount = 20;
+  var standingsExpanded = false;
 
   // ═══ DOM HELPERS ═══
   // NOTE: All user-facing data is escaped via esc() before being inserted into
@@ -231,7 +237,7 @@
     var cls, txt;
     if (ev >= 0.10) { cls = 'hot'; txt = '\uD83D\uDD25 +' + pct + '%'; }
     else if (ev >= 0.05) { cls = 'solid'; txt = '+' + pct + '%'; }
-    else { cls = 'fair'; txt = '+' + pct + '%'; }
+    else { cls = 'fair'; txt = (parseFloat(pct) >= 0 ? '+' : '') + pct + '%'; }
     return '<span class="ev-badge ' + cls + '">' + txt + '</span>';
   }
 
@@ -292,7 +298,7 @@
         '<span class="sb-league-flag">' + flag + '</span>' +
         '<span class="sb-league-name">' + esc(l.name) + '</span>' +
         (count > 0 ? '<span class="sb-league-count">' + count + '</span>' : '') +
-        '<button class="sb-star' + (isFav ? ' active' : '') + '" data-fav="' + l.id + '" aria-label="Избранное">' + (isFav ? '\u2605' : '\u2606') + '</button>' +
+        '<span class="sb-star' + (isFav ? ' active' : '') + '" role="button" tabindex="0" data-fav="' + l.id + '" aria-label="Избранное">' + (isFav ? '\u2605' : '\u2606') + '</span>' +
         '</button>';
 
       if (isFav) favHtml += btn;
@@ -356,32 +362,42 @@
 
     var matches = getFilteredMatches();
 
+    // Group predictions by fixture
+    var fixtureData = groupByFixture(matches);
+    var fixtureCount = fixtureData.order.length;
+
     var countEl = el('pills-count');
-    if (countEl) countEl.textContent = matches.length + ' прогноз' + (matches.length === 1 ? '' : matches.length < 5 ? 'а' : 'ов');
+    if (countEl) {
+      var mc = fixtureCount;
+      countEl.textContent = mc + ' матч' + (mc === 1 ? '' : mc < 5 ? 'а' : 'ей');
+    }
 
     if (!matches.length) {
-      feed.innerHTML = emptyHtml('\u26BD', 'Нет прогнозов', 'Попробуйте другую дату или фильтр');
+      feed.innerHTML = emptyHtml('\u26BD', 'Нет прогнозов на выбранную дату', 'Попробуйте другую дату или фильтр');
       return;
     }
 
-    var groups = {};
-    var groupOrder = [];
-    matches.forEach(function (m) {
+    // Build league groups from fixture groups (use first prediction per fixture for league info)
+    var leagueGroups = {};
+    var leagueOrder = [];
+    fixtureData.order.forEach(function (fid) {
+      var preds = fixtureData.groups[fid];
+      var m = preds[0]; // representative prediction
       var lid = m.league_id || 0;
-      if (!groups[lid]) {
-        groups[lid] = { league: m.league, league_id: lid, league_logo_url: m.league_logo_url, country: '', matches: [] };
+      if (!leagueGroups[lid]) {
+        leagueGroups[lid] = { league: m.league, league_id: lid, league_logo_url: m.league_logo_url, country: '', fixtures: [] };
         if (leaguesCache) {
           var lc = leaguesCache.find(function (l) { return l.id === lid; });
-          if (lc) groups[lid].country = lc.country || '';
+          if (lc) leagueGroups[lid].country = lc.country || '';
         }
-        groupOrder.push(lid);
+        leagueOrder.push(lid);
       }
-      groups[lid].matches.push(m);
+      leagueGroups[lid].fixtures.push({ fid: fid, preds: preds });
     });
 
     var html = '';
-    groupOrder.forEach(function (lid) {
-      var g = groups[lid];
+    leagueOrder.forEach(function (lid) {
+      var g = leagueGroups[lid];
       var isCollapsed = collapsedLeagues[lid];
       var flag = COUNTRY_FLAGS[g.country] || '';
 
@@ -394,12 +410,12 @@
       }
       html += '<span class="league-header-name">' + esc(g.league || 'League ' + lid) + '</span>';
       if (g.country) html += '<span class="league-header-country">' + esc(g.country) + '</span>';
-      html += '<span class="league-header-count">' + g.matches.length + '</span>';
+      html += '<span class="league-header-count">' + g.fixtures.length + '</span>';
       html += '<span class="league-header-chevron">\u203A</span>';
       html += '</div>';
       html += '<div class="league-body">';
-      g.matches.forEach(function (m) {
-        html += renderMatchRow(m);
+      g.fixtures.forEach(function (fix) {
+        html += renderMatchRow(fix.preds[0], fix.preds);
       });
       html += '</div></div>';
     });
@@ -408,12 +424,14 @@
     renderTopValue(matches);
   }
 
-  function renderMatchRow(m) {
+  function renderMatchRow(m, allPreds) {
+    allPreds = allPreds || [m];
     var isLive = m.fixture_status && LIVE_STATUSES.indexOf(m.fixture_status) >= 0;
     var hasScore = m.score && m.score !== 'null';
     var isExpanded = expandedMatch === _matchKey(m);
     var pickLabel = PICK_LABELS[m.pick] || m.pick || '\u2014';
     var marketLabel = MARKET_LABELS[m.market] || m.market || '1X2';
+    var extraCount = allPreds.length - 1;
 
     var html = '<div class="match-row' + (isExpanded ? ' expanded' : '') + (isLive ? ' live' : '') + '" data-match-key="' + _matchKey(m) + '" tabindex="0">';
     html += '<div class="match-main">';
@@ -424,7 +442,16 @@
       html += '<div class="match-time">' + formatTime(m.kickoff) + '</div>';
     }
 
-    html += '<div class="match-teams">' + esc(m.home) + ' \u2014 ' + esc(m.away) + '</div>';
+    html += '<div class="match-teams">'
+         + logoImg(m.home_logo_url, m.home, 18)
+         + '<span class="match-team-name">' + esc(m.home) + '</span>'
+         + '<span class="match-team-sep">\u2014</span>'
+         + '<span class="match-team-name">' + esc(m.away) + '</span>'
+         + logoImg(m.away_logo_url, m.away, 18);
+    if (extraCount > 0) {
+      html += ' <span class="match-extra-badge">+' + extraCount + '</span>';
+    }
+    html += '</div>';
 
     if (hasScore) {
       html += '<div class="match-score">' + esc(m.score) + '</div>';
@@ -439,7 +466,7 @@
     html += '</div>';
 
     if (isExpanded) {
-      html += renderMatchDetail(m);
+      html += renderMatchDetail(m, allPreds);
     }
 
     html += '</div>';
@@ -447,32 +474,71 @@
   }
 
   function _matchKey(m) {
-    return m.fixture_id + '_' + (m.market || '1X2');
+    return String(m.fixture_id);
   }
 
-  function renderMatchDetail(m) {
+  // Group flat predictions array by fixture_id, sorted by EV desc within each group
+  function groupByFixture(matches) {
+    var grouped = {};
+    var order = [];
+    matches.forEach(function (m) {
+      var fid = String(m.fixture_id);
+      if (!grouped[fid]) {
+        grouped[fid] = [];
+        order.push(fid);
+      }
+      grouped[fid].push(m);
+    });
+    // Sort predictions within each fixture by EV descending
+    order.forEach(function (fid) {
+      grouped[fid].sort(function (a, b) { return (b.ev || 0) - (a.ev || 0); });
+    });
+    return { groups: grouped, order: order };
+  }
+
+  function _shortenTeam(name) {
+    if (!name) return '';
+    return name.replace(/^(FC|CF|SC|AC|AS|SS|US|RC|CD|CA|SE|CR|FK|NK|SK|GD|UD|AD|SD|IF|BK)\s+/i, '')
+               .replace(/\s+(FC|CF|SC|AC|FK|SK|BK)$/i, '')
+               .replace(/\s+(de|del|di|du|da|dos|do|la|le|el|al|von|van)\s+/gi, ' ');
+  }
+
+  function _renderSinglePredDetail(m) {
     var pickLabel = PICK_LABELS_FULL[m.pick] || PICK_LABELS[m.pick] || m.pick || '\u2014';
     var confPct = m.confidence != null ? (m.confidence * 100).toFixed(0) : '\u2014';
     var evPct = m.ev != null ? (m.ev > 0 ? '+' : '') + (m.ev * 100).toFixed(1) + '%' : '\u2014';
 
-    var html = '<div class="match-detail">';
-    html += '<div class="match-detail-grid">';
-
+    var html = '<div class="match-detail-grid">';
     html += '<div class="match-detail-card"><div class="match-detail-label">Прогноз</div><div class="match-detail-val">' + esc(pickLabel) + '</div></div>';
     html += '<div class="match-detail-card"><div class="match-detail-label">Коэфф.</div><div class="match-detail-val">' + (m.odd != null ? m.odd.toFixed(2) : '\u2014') + '</div></div>';
     html += '<div class="match-detail-card"><div class="match-detail-label">Exp. Value</div><div class="match-detail-val" style="color:' + (m.ev >= 0.10 ? 'var(--yellow)' : m.ev >= 0.05 ? 'var(--green)' : 'var(--text)') + '">' + evPct + '</div></div>';
 
     html += '<div class="match-detail-card"><div class="match-detail-label">Confidence</div>';
-    html += '<div class="match-detail-val">' + confPct + '%</div>';
+    html += '<div class="match-detail-val">' + confPct + (m.confidence != null ? '%' : '') + '</div>';
     if (m.confidence != null) {
       html += '<div class="match-detail-conf-bar"><div class="match-detail-conf-fill" style="width:' + Math.min(100, m.confidence * 100) + '%"></div></div>';
     }
     html += '</div>';
-
     html += '</div>';
 
     if (m.ev != null && m.ev >= 0.10) {
       html += '<div class="match-detail-alert">\uD83D\uDD25 Strong value \u2014 EV превышает 10%</div>';
+    }
+    return html;
+  }
+
+  function renderMatchDetail(m, allPreds) {
+    allPreds = allPreds || [m];
+    var html = '<div class="match-detail">';
+
+    if (allPreds.length > 1) {
+      allPreds.forEach(function (pred) {
+        var marketName = MARKET_LABELS[pred.market] || pred.market || '1X2';
+        html += '<div class="match-detail-market-header">' + esc(marketName) + '</div>';
+        html += _renderSinglePredDetail(pred);
+      });
+    } else {
+      html += _renderSinglePredDetail(m);
     }
 
     html += '</div>';
@@ -500,7 +566,13 @@
 
       html += '<div class="result-row ' + (isWin ? 'win' : 'loss') + '">';
       html += '<div><span class="result-dot ' + (isWin ? 'win' : 'loss') + '"></span></div>';
-      html += '<div class="result-match"><span class="result-home">' + esc(r.home) + '</span><span class="result-score"> ' + esc(r.score || '') + ' </span><span class="result-away">' + esc(r.away) + '</span></div>';
+      html += '<div class="result-match">'
+           + logoImg(r.home_logo_url, r.home, 16)
+           + '<span class="result-home">' + esc(r.home) + '</span>'
+           + '<span class="result-score"> ' + esc(r.score || '') + ' </span>'
+           + '<span class="result-away">' + esc(r.away) + '</span>'
+           + logoImg(r.away_logo_url, r.away, 16)
+           + '</div>';
       html += '<div class="result-meta"><span class="result-league">' + esc(r.league || '') + '</span><span class="result-date">' + formatDateShort(r.kickoff) + '</span></div>';
       html += '<div class="result-pick"><span class="match-pick-market">' + esc(marketLabel) + '</span> <span class="match-pick-sel">' + esc(pickLabel) + '</span></div>';
       html += '<div class="result-odd">' + (r.odd != null ? r.odd.toFixed(2) : '\u2014') + '</div>';
@@ -527,8 +599,10 @@
 
     var html = '';
     sorted.forEach(function (m) {
+      var fullName = (m.home || '') + ' \u2014 ' + (m.away || '');
+      var shortName = _shortenTeam(m.home || '') + ' \u2014 ' + _shortenTeam(m.away || '');
       html += '<div class="rs-top-item" data-match-key="' + _matchKey(m) + '">';
-      html += '<div class="rs-top-teams">' + esc(m.home) + ' \u2014 ' + esc(m.away) + '</div>';
+      html += '<div class="rs-top-teams" title="' + esc(fullName) + '">' + esc(shortName) + '</div>';
       html += '<span class="match-pick-sel" style="font-size:10px">' + esc(PICK_LABELS[m.pick] || m.pick || '') + '</span>';
       html += '<span class="rs-top-odd">' + (m.odd != null ? m.odd.toFixed(2) : '') + '</span>';
       html += renderValueBadge(m.ev);
@@ -538,12 +612,15 @@
   }
 
   // Standings mini — data from our own API, all fields escaped via esc()
+  var _standingsFullData = null;
+
   function renderStandingsMini(data) {
     var body = el('rs-standings-body');
     if (!body) return;
     if (!data || !data.length) { body.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">Нет данных</div>'; return; }
 
-    var rows = data.slice(0, 8);
+    _standingsFullData = data;
+    var rows = standingsExpanded ? data : data.slice(0, 8);
     var html = '<table class="rs-standings-table"><thead><tr><th>#</th><th>Клуб</th><th>И</th><th>О</th><th>Форма</th></tr></thead><tbody>';
     rows.forEach(function (r) {
       var formDots = (r.form || '').split('').map(function (ch) {
@@ -560,6 +637,9 @@
       html += '</tr>';
     });
     html += '</tbody></table>';
+    if (data.length > 8) {
+      html += '<button class="standings-toggle" id="standings-toggle">' + (standingsExpanded ? 'Свернуть' : 'Показать все') + '</button>';
+    }
     body.innerHTML = html;
   }
 
@@ -644,7 +724,7 @@
         '<td>' + esc(r.score || '\u2014') + '</td>' +
         '<td><span class="match-pick-market">' + esc(marketLabel) + '</span> ' + esc(pickLabel) + '</td>' +
         '<td>' + (r.odd != null ? r.odd.toFixed(2) : '\u2014') + '</td>' +
-        '<td><span class="an-result-badge ' + (isWin ? 'win' : 'loss') + '">' + (isWin ? 'Win' : 'Loss') + '</span></td>' +
+        '<td><span class="an-result-badge ' + (isWin ? 'win' : 'loss') + '"><span class="an-badge-full">' + (isWin ? 'Win' : 'Loss') + '</span><span class="an-badge-short">' + (isWin ? 'W' : 'L') + '</span></span></td>' +
         '<td><span class="an-profit ' + (r.profit >= 0 ? 'positive' : 'negative') + '">' + profitStr + '</span></td>' +
         '</tr>';
     }).join('');
@@ -962,15 +1042,75 @@
     });
   }
 
+  function renderResultsLeaguePills() {
+    var cont = el('results-league-pills');
+    if (!cont) return;
+    var leagues = {};
+    resultsAllData.forEach(function (r) {
+      if (r.league) leagues[r.league] = (leagues[r.league] || 0) + 1;
+    });
+    var keys = Object.keys(leagues).sort(function (a, b) { return leagues[b] - leagues[a]; });
+    var html = '<button class="pill' + (resultsLeagueFilter === null ? ' active' : '') + '" data-res-league="all">Все</button>';
+    keys.forEach(function (name) {
+      html += '<button class="pill' + (resultsLeagueFilter === name ? ' active' : '') + '" data-res-league="' + esc(name) + '">' + esc(name) + ' <span style="opacity:0.5">' + leagues[name] + '</span></button>';
+    });
+    cont.innerHTML = html;
+  }
+
+  function renderResultsMarketPills() {
+    var cont = el('results-market-pills');
+    if (!cont) return;
+    var pills = [
+      { key: 'all', label: 'Все' },
+      { key: '1X2', label: '1X2' },
+      { key: 'TOTAL', label: 'Тотал' },
+      { key: 'DOUBLE_CHANCE', label: 'ДШ' },
+    ];
+    var html = '';
+    pills.forEach(function (p) {
+      html += '<button class="pill' + (resultsMarketFilter === p.key ? ' active' : '') + '" data-res-market="' + p.key + '">' + p.label + '</button>';
+    });
+    cont.innerHTML = html;
+  }
+
+  function getFilteredResults() {
+    return resultsAllData.filter(function (r) {
+      if (resultsLeagueFilter && r.league !== resultsLeagueFilter) return false;
+      if (resultsMarketFilter !== 'all') {
+        if (resultsMarketFilter === 'TOTAL') return r.market && r.market.indexOf('TOTAL') === 0;
+        return r.market === resultsMarketFilter;
+      }
+      return true;
+    });
+  }
+
+  function applyResultsFilters() {
+    var filtered = getFilteredResults();
+    var sliced = filtered.slice(0, resultsDisplayCount);
+    renderResultsFeed(sliced);
+    var loadMoreWrap = el('results-load-more');
+    if (loadMoreWrap) {
+      loadMoreWrap.style.display = filtered.length > resultsDisplayCount ? '' : 'none';
+    }
+  }
+
   function loadResults() {
     var feed = el('results-feed');
     if (feed) feed.innerHTML = skeletonRows(6);
 
-    var params = { days: 30, limit: 50 };
+    var params = { days: 60, limit: 200 };
     if (activeLeague) params.league_id = activeLeague;
 
+    resultsLeagueFilter = null;
+    resultsMarketFilter = 'all';
+    resultsDisplayCount = 20;
+
     return api('/results', params).then(function (res) {
-      renderResultsFeed(res.data);
+      resultsAllData = res.data || [];
+      resultsCache = resultsAllData;
+      renderResultsLeaguePills();
+      renderResultsMarketPills();
+      applyResultsFilters();
     }).catch(function (e) {
       if (_isAbort(e)) return;
       if (feed) feed.innerHTML = errorHtml('Не удалось загрузить результаты', 'results');
@@ -988,18 +1128,27 @@
       renderAnalyticsTable(data);
       renderLeagueBreakdown(data);
 
-      var profitCanvas = el('profit-chart');
-      var roiCanvas = el('roi-chart');
-      if (data && data.length >= 2) {
-        if (profitCanvas) { try { _drawChart(profitCanvas, data, { roi: false }); } catch (e) { /* noop */ } }
-        if (roiCanvas) { try { _drawChart(roiCanvas, data, { roi: true }); } catch (e) { /* noop */ } }
-      } else {
-        if (profitCanvas && profitCanvas.parentElement) profitCanvas.parentElement.innerHTML = '<div style="padding:40px 0;text-align:center;color:var(--muted)">Недостаточно данных</div>';
-        if (roiCanvas && roiCanvas.parentElement) roiCanvas.parentElement.innerHTML = '<div style="padding:40px 0;text-align:center;color:var(--muted)">Недостаточно данных</div>';
-      }
+      _analyticsChartData = data;
+      _redrawAnalyticsCharts();
     }).catch(function (e) {
-      if (!_isAbort(e)) console.error('loadAnalytics error', e);
+      if (_isAbort(e)) return;
+      console.error('loadAnalytics error', e);
+      var statsEl = el('an-stats');
+      if (statsEl) statsEl.innerHTML = errorHtml('Не удалось загрузить аналитику', 'analytics');
     });
+  }
+
+  function _redrawAnalyticsCharts() {
+    var data = _analyticsChartData;
+    var profitCanvas = el('profit-chart');
+    var roiCanvas = el('roi-chart');
+    if (data && data.length >= 2) {
+      if (profitCanvas) { try { _drawChart(profitCanvas, data, { roi: false }); } catch (e) { /* noop */ } }
+      if (roiCanvas) { try { _drawChart(roiCanvas, data, { roi: true }); } catch (e) { /* noop */ } }
+    } else {
+      if (profitCanvas && profitCanvas.parentElement) profitCanvas.parentElement.innerHTML = '<div style="padding:40px 0;text-align:center;color:var(--muted)">Недостаточно данных</div>';
+      if (roiCanvas && roiCanvas.parentElement) roiCanvas.parentElement.innerHTML = '<div style="padding:40px 0;text-align:center;color:var(--muted)">Недостаточно данных</div>';
+    }
   }
 
   function loadStandings(leagueId) {
@@ -1081,8 +1230,36 @@
       return;
     }
 
+    // Results league filter pill
+    var resLeaguePill = target.closest('[data-res-league]');
+    if (resLeaguePill) {
+      var lVal = resLeaguePill.dataset.resLeague;
+      resultsLeagueFilter = lVal === 'all' ? null : lVal;
+      resultsDisplayCount = 20;
+      renderResultsLeaguePills();
+      applyResultsFilters();
+      return;
+    }
+
+    // Results market filter pill
+    var resMarketPill = target.closest('[data-res-market]');
+    if (resMarketPill) {
+      resultsMarketFilter = resMarketPill.dataset.resMarket;
+      resultsDisplayCount = 20;
+      renderResultsMarketPills();
+      applyResultsFilters();
+      return;
+    }
+
+    // Load more results
+    if (target.id === 'btn-load-more' || target.closest('#btn-load-more')) {
+      resultsDisplayCount += 20;
+      applyResultsFilters();
+      return;
+    }
+
     var pill = target.closest('.pill');
-    if (pill) {
+    if (pill && pill.dataset.market) {
       marketFilter = pill.dataset.market;
       renderPills();
       renderMatchFeed();
@@ -1105,7 +1282,7 @@
       // Switch to predictions view, reset filters, expand target match
       if (currentView !== 'predictions') { navigate('predictions'); }
       marketFilter = 'all';
-      selectedDate = 'all';
+      selectedDate = 'today';
       activeLeague = null;
       expandedMatch = topKey;
       renderDateSlider();
@@ -1149,10 +1326,19 @@
     if (sbLeague) {
       var leagueId = parseInt(sbLeague.dataset.leagueId, 10);
       activeLeague = activeLeague === leagueId ? null : leagueId;
+      // FIX 2: Reset market filter on league switch
+      marketFilter = 'all';
+      renderPills();
       if (currentView === 'predictions') {
         loadPredictions();
       } else if (currentView === 'results') {
         loadResults();
+      }
+      // FIX 1: Sync standings with selected league
+      if (activeLeague) {
+        loadStandings(activeLeague);
+        var stSel = el('rs-league-select');
+        if (stSel) stSel.value = activeLeague;
       }
       renderSidebar();
       return;
@@ -1182,6 +1368,13 @@
       _store('resultsSort', resultsSort);
       _renderSortedResults();
       _updateSortHeaders();
+      return;
+    }
+
+    // Standings toggle
+    if (target.id === 'standings-toggle' || target.closest('#standings-toggle')) {
+      standingsExpanded = !standingsExpanded;
+      if (_standingsFullData) renderStandingsMini(_standingsFullData);
       return;
     }
 
@@ -1255,7 +1448,7 @@
   window.addEventListener('resize', function () {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function () {
-      if (currentView === 'analytics') loadAnalytics();
+      if (currentView === 'analytics') _redrawAnalyticsCharts();
       _checkTableScroll();
     }, 300);
   });
@@ -1267,22 +1460,43 @@
       wraps[i].classList.toggle('has-scroll', wraps[i].scrollWidth > wraps[i].clientWidth + 4);
     }
   }
-  new MutationObserver(_checkTableScroll).observe(document.body, { childList: true, subtree: true });
+  // Debounced table scroll check — avoids firing on every DOM mutation
+  (function () {
+    var _scrollCheckTimer;
+    var _debouncedCheck = function () {
+      clearTimeout(_scrollCheckTimer);
+      _scrollCheckTimer = setTimeout(_checkTableScroll, 150);
+    };
+    var wraps = document.querySelectorAll('.an-results-table-wrap');
+    if (typeof ResizeObserver !== 'undefined' && wraps.length > 0) {
+      var ro = new ResizeObserver(_debouncedCheck);
+      for (var i = 0; i < wraps.length; i++) ro.observe(wraps[i]);
+    }
+    // Fallback: debounced MutationObserver for dynamically added tables
+    new MutationObserver(_debouncedCheck).observe(document.body, { childList: true, subtree: false });
+  })();
 
   // Connection ping
   (function () {
     var dot = el('conn-dot');
     if (!dot) return;
     function ping() {
-      fetch('/api/public/v1/leagues', { method: 'HEAD' })
-        .then(function (r) { dot.className = 'conn-dot ' + (r.ok ? 'ok' : 'offline'); })
-        .catch(function () { dot.className = 'conn-dot offline'; });
+      fetch('/api/public/v1/leagues')
+        .then(function (r) {
+          var ok = r.ok;
+          dot.className = 'conn-dot ' + (ok ? 'ok' : 'offline');
+          dot.title = ok ? 'Подключено' : 'Нет соединения';
+        })
+        .catch(function () {
+          dot.className = 'conn-dot offline';
+          dot.title = 'Нет соединения';
+        });
     }
     ping();
     var connTimer = setInterval(ping, 45000);
     document.addEventListener('visibilitychange', function () {
-      if (document.hidden) clearInterval(connTimer);
-      else { ping(); connTimer = setInterval(ping, 45000); }
+      clearInterval(connTimer);
+      if (!document.hidden) { ping(); connTimer = setInterval(ping, 45000); }
     });
   })();
 

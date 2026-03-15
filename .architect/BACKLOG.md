@@ -25,6 +25,20 @@ Lead просматривает этот файл и решает, что при
 
 [2026-02-22] [low] — Market columns hardcoded в 40+ местах по 6 файлам (sync_data, build_predictions, evaluate_results, quality_report, main.py, publishing). Нет централизованного markets.py. Добавление нового рынка требует правок в 15+ паттернах. Кандидат на рефакторинг при добавлении следующего рынка.
 
+## === Post-Task 22 (roadmap validation) — 2026-03-13 ===
+
+[2026-03-13] [high] — Train Pinnacle calibrator after 50+ Pinnacle odds accumulate. Script ready: `scripts/train_pinnacle_calibrator.py`. Config: `USE_PINNACLE_CALIB=false` → set to `true` after training.
+
+[2026-03-13] [high] — Retrain stacking v3 (30 features) after 100+ predictions settle with v3 features. V3 features are being computed in build_predictions but need match results. Script: `python scripts/train_stacking.py --from-file` (after `generate_training_data.py` updated for v3 features).
+
+[2026-03-13] [medium] — CMP-DC failed ablation (0/6 leagues, ΔRPS +0.00042, D033). Future research: (a) try per-team nu instead of competitive-balance function, (b) fit nu jointly with DC params (not two-step), (c) explore bivariate CMP. Currently disabled.
+
+[2026-03-13] [medium] — `generate_training_data.py` does not compute v3 features (market, performance, context). Needs update to include odds_movement, overround, disagree, xg_overperf, form_trend, standings_pts/rank_diff, rest_diff for walk-forward v3 training data.
+
+~~[2026-02-22] [high] — Historical standings data for hist_fixtures~~ **RESOLVED** (Task 22): team_standings_history table + backfill job + LATERAL join. 21,135 records.
+
+~~[2026-02-22] [medium] — Pinnacle closing line as calibration target~~ **RESOLVED** (Task 22): Pinnacle dual-sync enabled. Calibration service created. Awaiting data accumulation.
+
 ## === Post-Task 20 (post-monitoring config) — 2026-03-01 ===
 
 [2026-03-01] [high] — Stacking обучен только на 1X2 features. Secondary markets
@@ -33,10 +47,9 @@ BTTS/TOTAL_1_5/3_5 нужен: (a) отдельный стэкинг для bina
 (b) Dirichlet calibration для Poisson-based probs, или (c) COM-Poisson для
 лучшего goal distribution modeling.
 
-[2026-03-01] [medium] — 243 из 304 settled имеют prob_source=unknown (legacy).
-Эти predictions не используют DC/стэкинг и загрязняют метрики. Рассмотреть:
-фильтрацию legacy predictions из отчётов, или маркировку prob_source при
-settlement для ретроспективного анализа.
+~~[2026-03-01] [medium] — 243 из 304 settled имеют prob_source=unknown (legacy)~~ **RESOLVED** (Task 21): Logistic fallback полностью удалён из pipeline. Все новые predictions имеют prob_source=stacking/dc_only/poisson_fallback. Legacy logistic (34 settled, ROI -8.2%) больше не генерируются.
+
+[2026-03-10] [medium] — Primeira Liga (ID 94) отключена для predictions (`DISABLED_PREDICTION_LEAGUES=94`). Data sync продолжается. Реактивировать при улучшении калибровки или увеличении выборки.
 
 [2026-03-01] [medium] — CLV = 0.00% на 45 predictions с closing odds.
 Нейтральный CLV = модель не бьёт рынок. Возможные причины: (a) timing —

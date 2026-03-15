@@ -263,15 +263,36 @@ def _parse_card_data(
         (i for i, line in enumerate(lines[1:], start=1) if _is_datetime_line(line)),
         None,
     )
+    # Search for recommendation header AFTER the match/date lines
+    # to avoid matching the title_label at the top of the card
+    _search_from = max(match_idx or 0, date_idx or 0)
     rec_idx = None
     if clean_bet:
-        rec_idx = next((i for i, line in enumerate(lines) if line.lower() == clean_bet.lower()), None)
+        # Exact match (only after match/date)
+        rec_idx = next(
+            (i for i, line in enumerate(lines) if i >= _search_from and line.lower() == clean_bet.lower()),
+            None,
+        )
+        # Contains match (handles "━━━ PREDICTION ━━━" matching "PREDICTION")
+        if rec_idx is None:
+            rec_idx = next(
+                (i for i, line in enumerate(lines)
+                 if i >= _search_from and clean_bet.lower() in line.lower() and line != clean_bet),
+                None,
+            )
     if rec_idx is None:
+        _rec_keywords = {
+            "BET OF THE DAY", "RECOMMENDATION", "РЕКОМЕНДАЦІЯ",
+            "РЕКОМЕНДАЦИЯ", "PREDICTION", "ПРОГНОЗ",
+            "PRONOSTIC", "TIPP", "TYP", "PALPITE",
+            "PRONÓSTICO", "PROGNOSE", "PRÉDICTION",
+            "PREVISÃO", "PROGNOZA",
+        }
         rec_idx = next(
             (
                 i
                 for i, line in enumerate(lines)
-                if line.upper() in {"BET OF THE DAY", "RECOMMENDATION", "РЕКОМЕНДАЦИЯ"}
+                if i >= _search_from and line.upper().strip("━ ") in _rec_keywords
             ),
             None,
         )
@@ -638,7 +659,7 @@ def _build_html(
     html, body {{ margin: 0; padding: 0; }}
     body {{
       background: #040915;
-      font-family: "PredSans", "Segoe UI", Arial, sans-serif;
+      font-family: "PredSans", "Noto Color Emoji", "DejaVu Sans", "Segoe UI", Arial, sans-serif;
     }}
     #post-canvas {{
       width: {width}px;

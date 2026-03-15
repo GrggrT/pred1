@@ -1,13 +1,16 @@
+###############################################################################
+# GCP Free Tier docker-compose (e2-micro: 1GB RAM + 2GB swap)
+# Combined app+scheduler in single container to save memory
+# Usage: docker compose -f deploy/docker-compose.gcp.yml up -d
+###############################################################################
 services:
   db:
     image: postgres:16
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: fc_mvp
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -15,52 +18,53 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    command: >
+      postgres
+      -c shared_buffers=64MB
+      -c effective_cache_size=128MB
+      -c work_mem=2MB
+      -c maintenance_work_mem=32MB
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   app:
-    build: .
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.prod
     restart: unless-stopped
-    env_file: .env
+    env_file: ../.env
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "8000:8000"
     environment:
-      SCHEDULER_ENABLED: "false"
+      SCHEDULER_ENABLED: "true"
       SNAPSHOT_AUTOFILL_ENABLED: "false"
     command: >
       uvicorn app.main:app
       --host 0.0.0.0
       --port 8000
+      --workers 1
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-
-  scheduler:
-    build: .
-    restart: unless-stopped
-    env_file: .env
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      SCHEDULER_ENABLED: "true"
-    command: >
-      python -m app.scheduler_runner
-    healthcheck:
-      test: ["CMD-SHELL", "python -c 'import app; print(\"ok\")'"]
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   ai-office:
-    build: .
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.prod
     restart: unless-stopped
-    env_file: .env
+    env_file: ../.env
     depends_on:
       db:
         condition: service_healthy
@@ -77,6 +81,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 volumes:
   pgdata:

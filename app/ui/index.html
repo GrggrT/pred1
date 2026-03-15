@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Football Value Betting — Админ</title>
+  <title>FVB — Legacy Panel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800&family=Onest:wght@400;500;600;700&display=swap&subset=cyrillic" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='16' fill='%230f172a'/><text x='16' y='22' text-anchor='middle' font-size='20' font-weight='bold' fill='%234ade80'>F</text></svg>">
   <link rel="stylesheet" href="/ui/ui.css">
 </head>
 <body>
@@ -36,8 +37,12 @@
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <div class="brand-title">Football Value Betting</div>
-        <div class="brand-sub">Админ‑панель: лайв, история ставок, операции, данные.</div>
+        <div class="brand-title">FVB Legacy</div>
+        <div class="brand-sub" style="color:var(--yellow,#f59e0b);font-size:11px;margin-bottom:6px">⚠ Устаревшая версия. Используйте <a href="/admin" style="color:var(--accent,#4ade80);text-decoration:underline">новую админ‑панель</a></div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <a href="/" style="font-size:11px;color:var(--muted,#94a3b8);text-decoration:none;opacity:0.7">📊 Публичный</a>
+          <a href="/admin" style="font-size:11px;color:var(--muted,#94a3b8);text-decoration:none;opacity:0.7">⚙ Админ</a>
+        </div>
       </div>
 
       <nav class="nav">
@@ -177,6 +182,24 @@
           <div class="dashboard-flow-head mt-3">
             <h3 class="dashboard-flow-title">Качество и аналитика</h3>
             <p class="dashboard-flow-subtitle">Калибровка модели, CLV и сигналы риска</p>
+          </div>
+
+          <div class="row mt-3">
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">
+                  <div class="header-left">
+                    <h3 class="card-title mb-0">🗺️ Прогресс дорожной карты</h3>
+                    <div id="roadmap-meta" class="small text-muted">С 13 марта 2026</div>
+                  </div>
+                  <div class="btn-group">
+                    <button type="button" class="btn-secondary btn-sm" data-action="refresh-roadmap" aria-label="Обновить прогресс" title="Обновить прогресс">🔄</button>
+                  </div>
+                </div>
+                <div id="roadmap-alert" class="is-hidden"></div>
+                <div id="roadmap-progress" class="roadmap-progress p-3">Загрузка...</div>
+              </div>
+            </div>
           </div>
 
           <div class="row mt-3">

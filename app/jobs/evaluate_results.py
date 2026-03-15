@@ -225,6 +225,73 @@ async def _log_roi(session: AsyncSession):
     roi = pnl / D(total)
     log.info("evaluate_results roi bets=%s pnl=%.3f roi=%.2f%%", total, pnl, float(roi * 100))
 
+    # CLV (Closing Line Value): compare our bet odds vs closing odds
+    # CLV = initial_implied_prob / closing_implied_prob - 1
+    # Positive CLV = we got better odds than closing line
+    # Dual CLV: against primary bookmaker closing AND Pinnacle closing (sharp benchmark)
+    clv_res = await session.execute(
+        text("""
+            SELECT p.initial_odd, p.selection_code,
+                   o.home_win AS close_home, o.draw AS close_draw, o.away_win AS close_away,
+                   pin.home_win AS pin_home, pin.draw AS pin_draw, pin.away_win AS pin_away
+            FROM predictions p
+            JOIN odds o ON o.fixture_id = p.fixture_id AND o.bookmaker_id = :bid
+            LEFT JOIN odds pin ON pin.fixture_id = p.fixture_id AND pin.bookmaker_id = :pin_bid
+            WHERE p.selection_code IN ('HOME_WIN', 'DRAW', 'AWAY_WIN')
+              AND p.status IN ('WIN', 'LOSS')
+              AND p.initial_odd IS NOT NULL
+        """),
+        {"bid": settings.bookmaker_id, "pin_bid": settings.pinnacle_bookmaker_id},
+    )
+    clv_rows = clv_res.fetchall()
+    if clv_rows:
+        clv_values = []
+        clv_pin_values = []
+        for cr in clv_rows:
+            closing_odd = None
+            pin_odd = None
+            if cr.selection_code == "HOME_WIN":
+                closing_odd = cr.close_home
+                pin_odd = getattr(cr, "pin_home", None)
+            elif cr.selection_code == "DRAW":
+                closing_odd = cr.close_draw
+                pin_odd = getattr(cr, "pin_draw", None)
+            elif cr.selection_code == "AWAY_WIN":
+                closing_odd = cr.close_away
+                pin_odd = getattr(cr, "pin_away", None)
+
+            if closing_odd and cr.initial_odd and float(closing_odd) > 1.0:
+                # CLV = initial_odd / closing_odd - 1
+                clv = float(cr.initial_odd) / float(closing_odd) - 1.0
+                clv_values.append(clv)
+
+            # Pinnacle CLV (sharp benchmark)
+            if pin_odd and cr.initial_odd and float(pin_odd) > 1.0:
+                clv_pin = float(cr.initial_odd) / float(pin_odd) - 1.0
+                clv_pin_values.append(clv_pin)
+
+        if clv_values:
+            avg_clv = sum(clv_values) / len(clv_values)
+            positive_clv = sum(1 for c in clv_values if c > 0)
+            log.info(
+                "evaluate_results CLV(soft): avg=%.3f%% positive=%d/%d (%.1f%%)",
+                avg_clv * 100,
+                positive_clv,
+                len(clv_values),
+                positive_clv / len(clv_values) * 100 if clv_values else 0,
+            )
+
+        if clv_pin_values:
+            avg_clv_pin = sum(clv_pin_values) / len(clv_pin_values)
+            positive_clv_pin = sum(1 for c in clv_pin_values if c > 0)
+            log.info(
+                "evaluate_results CLV(pinnacle): avg=%.3f%% positive=%d/%d (%.1f%%)",
+                avg_clv_pin * 100,
+                positive_clv_pin,
+                len(clv_pin_values),
+                positive_clv_pin / len(clv_pin_values) * 100 if clv_pin_values else 0,
+            )
+
     # Binned ROI by signal_score
     bins = [
         ("[0.0,0.4)", 0.0, 0.4),

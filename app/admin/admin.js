@@ -212,6 +212,7 @@
   }
 
   /* ========== Animated Counter ========== */
+  const _kpiPrevValues = {};
   const _prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const _numFmt = typeof Intl !== 'undefined' ? new Intl.NumberFormat('ru-RU') : null;
@@ -263,12 +264,12 @@
       '<button class="adm-btn adm-btn-primary adm-btn-danger" data-confirm="ok">Подтвердить</button></div>';
     overlay.appendChild(dlg);
     document.body.appendChild(overlay);
-    const cleanup = () => overlay.remove();
+    const onEsc = (e) => { if (e.key === 'Escape') cleanup(); };
+    const cleanup = () => { document.removeEventListener('keydown', onEsc); overlay.remove(); };
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay || e.target.closest('[data-confirm="cancel"]')) { cleanup(); return; }
       if (e.target.closest('[data-confirm="ok"]')) { cleanup(); onConfirm(); }
     });
-    const onEsc = (e) => { if (e.key === 'Escape') { cleanup(); document.removeEventListener('keydown', onEsc); } };
     document.addEventListener('keydown', onEsc);
   }
 
@@ -503,19 +504,28 @@
 
     // All data from authenticated admin API, values escaped via esc()
     cont.innerHTML = html;
-    // Animate KPI values
+    // Animate KPI values (skip animation if value unchanged)
     animTargets.forEach(t => {
       var elem = el(t.id);
       if (!elem) return;
       var isPercent = t.item.key === 'roi' || t.item.key === 'win_rate';
       var isProfit = t.item.key === 'total_profit' || t.item.key === 'avg_bet';
       var isCount = t.item.key === 'total_bets' || t.item.key === 'active_leagues';
-      animateValue(elem, t.val, {
+      var opts = {
         suffix: isPercent ? '%' : '',
         decimals: isCount ? 0 : isProfit ? 2 : 1,
         sign: isProfit,
         thousands: isCount,
-      });
+      };
+      var prevKey = 'kpi_' + t.item.key;
+      if (_kpiPrevValues[prevKey] === t.val) {
+        // Value unchanged — set directly without animation
+        var prefix = opts.sign && t.val > 0.05 ? '+' : '';
+        elem.textContent = prefix + _fmtNum(t.val, opts.decimals, opts.thousands) + opts.suffix;
+      } else {
+        _kpiPrevValues[prevKey] = t.val;
+        animateValue(elem, t.val, opts);
+      }
     });
   }
 
@@ -549,7 +559,7 @@
   }
 
   /* ========== MATCHES ========== */
-  const matchState = { market: 'all', league: '', status: '', team: '', limit: 50, offset: 0 };
+  const matchState = { market: 'all', league: '', status: '', team: '', limit: 50, offset: 0, total: 0 };
   let adminLeaguesLoaded = false;
 
   async function populateAdminLeagueFilter() {
@@ -578,7 +588,7 @@
   async function loadMatches() {
     el('am-matches-list').innerHTML = skeletonHtml(5, 40);
     try {
-      populateAdminLeagueFilter();
+      populateAdminLeagueFilter().catch(function() {});
       const params = {
         sort: 'kickoff_desc',
         limit: matchState.limit,
@@ -591,7 +601,8 @@
       if (matchState.status) params.status = matchState.status;
       const res = await api('/bets/history', { params });
       _lastMatchesData = res.data || [];
-      renderMatchesTable(_lastMatchesData, res.total);
+      matchState.total = res.total || _lastMatchesData.length;
+      renderMatchesTable(_lastMatchesData, matchState.total);
     } catch (e) {
       if (_isAbort(e)) return;
       console.error('loadMatches', e);
@@ -607,14 +618,14 @@
       el('am-pagination').innerHTML = '';
       return;
     }
-    let html = '<table class="adm-table"><thead><tr>' +
+    let html = '<table class="adm-table" style="min-width:900px"><thead><tr>' +
       '<th class="adm-sortable" data-sort-match="kickoff">Дата' + _sortArrow(_matchSort, 'kickoff') + '</th>' +
       '<th>Матч</th><th>Лига</th>' +
       '<th class="adm-sortable" data-sort-match="market">Рынок' + _sortArrow(_matchSort, 'market') + '</th>' +
       '<th>Прогноз</th>' +
       '<th class="adm-sortable" data-sort-match="odd">Кф.' + _sortArrow(_matchSort, 'odd') + '</th>' +
       '<th class="adm-sortable" data-sort-match="ev">EV' + _sortArrow(_matchSort, 'ev') + '</th>' +
-      '<th>Сигнал</th>' +
+      '<th>Сигн.</th>' +
       '<th class="adm-sortable" data-sort-match="status">Статус' + _sortArrow(_matchSort, 'status') + '</th>' +
       '<th class="adm-sortable" data-sort-match="profit">Профит' + _sortArrow(_matchSort, 'profit') + '</th>' +
       '</tr></thead><tbody>';
@@ -759,7 +770,7 @@
         api('/market-stats', { params: { days: 0 } }).catch(() => ({ data: {} })),
         api('/bets/history', { params: { market: 'all', all_time: true, settled_only: true, sort: 'kickoff_desc', limit: 500 } }).catch(() => ({ data: [] })),
       ]);
-      const payload = { report: qRes.data, leagues: leaguesRes.data, stats: statsRes.data, marketStats: mktRes.data, chartRows: histRes.data || [] };
+      const payload = { report: qRes.data, leagues: leaguesRes.data, stats: statsRes.data, marketStats: (mktRes.data && mktRes.data.data) ? mktRes.data.data : mktRes.data, chartRows: histRes.data || [] };
       cacheSet('quality', payload);
       _renderQualityFromCache(payload);
     } catch (e) {
@@ -878,9 +889,20 @@
   }
 
   function drawAdmRoiChart(canvas, rows) {
+    if (canvas) {
+      var oldMsg = canvas.parentElement.querySelector('.chart-no-data');
+      if (oldMsg) oldMsg.remove();
+      canvas.style.display = '';
+    }
     const setup = _admChartSetup(canvas);
     if (!setup || !rows || rows.length < 2) {
-      if (canvas) canvas.parentElement.textContent = 'Недостаточно данных (минимум 2 ставки). Попробуйте сбросить фильтр рынка.';
+      if (canvas) {
+        canvas.style.display = 'none';
+        var msg = document.createElement('div');
+        msg.className = 'chart-no-data';
+        msg.textContent = 'Недостаточно данных (минимум 2 ставки). Попробуйте сбросить фильтр рынка.';
+        canvas.parentElement.appendChild(msg);
+      }
       delete _chartPoints['adm-roi-chart'];
       return;
     }
@@ -923,9 +945,20 @@
   }
 
   function drawAdmProfitChart(canvas, rows) {
+    if (canvas) {
+      var oldMsg = canvas.parentElement.querySelector('.chart-no-data');
+      if (oldMsg) oldMsg.remove();
+      canvas.style.display = '';
+    }
     const setup = _admChartSetup(canvas);
     if (!setup || !rows || rows.length < 2) {
-      if (canvas) canvas.parentElement.textContent = 'Недостаточно данных (минимум 2 ставки). Попробуйте сбросить фильтр рынка.';
+      if (canvas) {
+        canvas.style.display = 'none';
+        var msg = document.createElement('div');
+        msg.className = 'chart-no-data';
+        msg.textContent = 'Недостаточно данных (минимум 2 ставки). Попробуйте сбросить фильтр рынка.';
+        canvas.parentElement.appendChild(msg);
+      }
       delete _chartPoints['adm-profit-chart'];
       return;
     }
@@ -968,9 +1001,20 @@
   }
 
   function drawAdmCalibrationChart(canvas, bins) {
+    if (canvas) {
+      var oldMsg = canvas.parentElement.querySelector('.chart-no-data');
+      if (oldMsg) oldMsg.remove();
+      canvas.style.display = '';
+    }
     const setup = _admChartSetup(canvas);
     if (!setup || !bins || !bins.length) {
-      if (canvas) canvas.parentElement.innerHTML = '<div class="adm-loading" style="color:var(--muted)">Нет данных калибровки. Запустите «Отчёт качества»</div>';
+      if (canvas) {
+        canvas.style.display = 'none';
+        var msg = document.createElement('div');
+        msg.className = 'chart-no-data';
+        msg.textContent = 'Нет данных калибровки. Запустите «Отчёт качества»';
+        canvas.parentElement.appendChild(msg);
+      }
       delete _chartPoints['adm-calibration-chart'];
       return;
     }
@@ -1331,7 +1375,7 @@
         '<td>' + dur + '</td>' +
         '<td>' + esc(trigger) + '</td></tr>';
       if (r.error) {
-        html += '<tr><td colspan="5" style="color:var(--red);font-size:var(--font-size-xs);padding:4px 12px">' + esc(String(r.error).substring(0, 200)) + '</td></tr>';
+        html += '<tr><td colspan="5" style="color:var(--red);font-size:var(--font-size-xs);padding:4px 12px"><details><summary title="' + esc(String(r.error)) + '">' + esc(String(r.error).substring(0, 200)) + '</summary><pre style="white-space:pre-wrap;margin:4px 0 0;max-height:300px;overflow:auto">' + esc(String(r.error)) + '</pre></details></td></tr>';
       }
     });
     html += '</tbody></table>';
@@ -1347,15 +1391,15 @@
     allJobs.forEach(job => {
       const label = JOB_LABELS[job] || job;
       const run = runsArr.find(r => r.job_name === job);
-      const st = run ? run.status : '—';
+      const st = run ? run.status : 'never';
       const stCls = st === 'ok' ? 'adm-badge-win' : st === 'failed' ? 'adm-badge-loss' : st === 'running' ? 'adm-badge-signal' : 'adm-badge-pending';
-      const stLabel = st === 'ok' ? 'OK' : st === 'failed' ? 'Ошибка' : st === 'running' ? 'В работе' : st === '—' ? '—' : esc(st);
-      const time = run ? timeAgo(run.finished_at || run.started_at) : '—';
+      const stLabel = st === 'ok' ? 'OK' : st === 'failed' ? 'Ошибка' : st === 'running' ? 'В работе' : st === 'never' ? '<span style="color:var(--muted);font-style:italic">не запускалось</span>' : esc(st);
+      const timeHtml = run ? esc(timeAgo(run.finished_at || run.started_at)) : '<span style="color:var(--muted);font-style:italic">не запускалось</span>';
       const dur = run && run.duration_seconds != null ? (run.duration_seconds < 1 ? '<1с' : Math.round(run.duration_seconds) + 'с') : '';
       html += '<div class="adm-job-row">' +
         '<span class="adm-job-name">' + esc(label) + '</span>' +
         '<span class="adm-badge ' + stCls + ' adm-job-status">' + stLabel + '</span>' +
-        '<span class="adm-job-time">' + esc(time) + (dur ? ' (' + dur + ')' : '') + '</span>' +
+        '<span class="adm-job-time">' + timeHtml + (dur ? ' (' + dur + ')' : '') + '</span>' +
         '<button class="adm-btn-sm adm-btn-secondary" data-action="run-job" data-job="' + esc(job) + '">Запустить</button>' +
         '</div>';
     });
@@ -1463,7 +1507,8 @@
         type: 'error',
         icon: '&#x26A0;',
         text: (JOB_LABELS[r.job_name] || r.job_name) + ' — ошибка',
-        detail: r.error ? String(r.error).substring(0, 300) : 'Неизвестная ошибка',
+        detail: r.error ? String(r.error) : 'Неизвестная ошибка',
+        fullError: r.error ? String(r.error) : null,
         status: r.status,
       });
     });
@@ -1484,7 +1529,9 @@
         '<span class="adm-audit-icon">' + item.icon + '</span>' +
         '<div class="adm-audit-content">' +
         '<div class="adm-audit-text">' + esc(item.text) + ' <span class="adm-badge ' + stCls + '" style="font-size:10px">' + stLabel + '</span></div>' +
-        '<div class="adm-audit-detail">' + esc(item.detail) + '</div>' +
+        (item.fullError
+          ? '<div class="adm-audit-detail"><details><summary title="' + esc(item.fullError) + '">' + esc(item.detail.substring(0, 300)) + '</summary><pre style="white-space:pre-wrap;margin:4px 0 0;max-height:300px;overflow:auto">' + esc(item.fullError) + '</pre></details></div>'
+          : '<div class="adm-audit-detail">' + esc(item.detail) + '</div>') +
         '<div class="adm-audit-time">' + formatDate(item.ts) + '</div>' +
         '</div></div>';
     });
@@ -1556,6 +1603,23 @@
         if (p.ev != null) html += `<div class="adm-modal-row"><span class="adm-modal-label">EV</span><span>${(p.ev * 100).toFixed(1)}%</span></div>`;
         if (p.status) html += `<div class="adm-modal-row"><span class="adm-modal-label">Статус</span><span>${statusBadge(p.status)}</span></div>`;
         if (p.signal_score != null) html += `<div class="adm-modal-row"><span class="adm-modal-label">Сигнал</span><span>${(p.signal_score * 100).toFixed(0)}%</span></div>`;
+      }
+
+      if (d.predictions_totals && Array.isArray(d.predictions_totals) && d.predictions_totals.length) {
+        html += `<h4 style="margin:20px 0 10px">Дополнительные прогнозы</h4>`;
+        d.predictions_totals.forEach(pt => {
+          const mktLabel = MARKET_LABELS[pt.market] || MARKET_LABELS[(pt.market || '').toUpperCase()] || pt.market || '—';
+          const pickLbl = PICK_LABELS[pt.pick] || PICK_LABELS[pt.selection_code] || pt.pick || pt.selection_code || '—';
+          html += `<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-2);border-radius:var(--radius-sm)">`;
+          html += `<div style="font-weight:600;font-size:var(--font-size-sm);margin-bottom:6px">${esc(mktLabel)}</div>`;
+          html += `<div class="adm-modal-row"><span class="adm-modal-label">Выбор</span><span class="adm-badge adm-badge-pick">${esc(pickLbl)}</span></div>`;
+          if (pt.odd) html += `<div class="adm-modal-row"><span class="adm-modal-label">Коэффициент</span><span>${Number(pt.odd).toFixed(2)}</span></div>`;
+          if (pt.confidence != null) html += `<div class="adm-modal-row"><span class="adm-modal-label">Уверенность</span><span>${(pt.confidence * 100).toFixed(1)}%</span></div>`;
+          if (pt.ev != null) html += `<div class="adm-modal-row"><span class="adm-modal-label">EV</span><span>${(pt.ev * 100).toFixed(1)}%</span></div>`;
+          if (pt.status) html += `<div class="adm-modal-row"><span class="adm-modal-label">Статус</span><span>${statusBadge(pt.status)}</span></div>`;
+          if (pt.signal_score != null) html += `<div class="adm-modal-row"><span class="adm-modal-label">Сигнал</span><span>${(pt.signal_score * 100).toFixed(0)}%</span></div>`;
+          html += `</div>`;
+        });
       }
 
       if (d.odds) {
@@ -1634,7 +1698,9 @@
 
       let html = '<div style="background:var(--bg-2);padding:16px;border-radius:var(--radius-sm);font-size:var(--font-size-sm);margin-bottom:16px">';
       if (previewRes.data && previewRes.data.html) {
-        html += previewRes.data.html;
+        // Trusted admin API content — strip script tags as a safety measure
+        var safeHtml = (previewRes.data.html || '').replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+        html += safeHtml;
       } else if (previewRes.data && previewRes.data.text) {
         html += '<pre style="white-space:pre-wrap">' + esc(previewRes.data.text) + '</pre>';
       } else {
@@ -1689,16 +1755,59 @@
       cont.innerHTML = '<div class="adm-loading" style="color:var(--muted)">Нет публикаций за выбранный период. Попробуйте увеличить диапазон</div>';
       return;
     }
-    // All data comes from authenticated admin API (trusted source)
-    let html = '<table class="adm-table"><thead><tr><th>Дата</th><th>Матч</th><th>Рынок</th><th>Язык</th><th>Статус</th><th>Ошибка</th></tr></thead><tbody>';
+    // Group items by fixture_id + market
+    const groups = {};
     data.forEach(h => {
-      const stCls = h.status === 'ok' ? 'adm-badge-win' : h.status === 'skipped' ? 'adm-badge-pending' : h.status === 'dry_run' ? 'adm-badge-signal' : 'adm-badge-loss';
-      const stLabel = h.status === 'ok' ? 'OK' : h.status === 'skipped' ? 'Пропущено' : h.status === 'dry_run' ? 'Dry Run' : h.status === 'failed' ? 'Ошибка' : esc(h.status || '—');
-      const match = (h.home && h.away) ? esc(h.home) + ' — ' + esc(h.away) : '#' + h.fixture_id;
-      const errText = h.error ? esc(String(h.error).substring(0, 100)) : '';
-      html += '<tr><td>' + formatDate(h.created_at) + '</td><td>' + match + '</td><td>' + esc(h.market || '—') + '</td><td>' + esc(h.language || '—') + '</td><td><span class="adm-badge ' + stCls + '">' + stLabel + '</span></td><td style="font-size:var(--font-size-xs);color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(h.error || '') + '">' + errText + '</td></tr>';
+      const match = (h.home && h.away) ? h.home + ' — ' + h.away : '#' + h.fixture_id;
+      const key = (h.fixture_id || match) + '||' + (h.market || '');
+      if (!groups[key]) {
+        groups[key] = { match: match, market: h.market || '—', fixture_id: h.fixture_id, date: h.created_at, items: [] };
+      }
+      groups[key].items.push(h);
+      // Use earliest date for the group header
+      if (h.created_at && (!groups[key].date || h.created_at < groups[key].date)) {
+        groups[key].date = h.created_at;
+      }
     });
-    html += '</tbody></table>';
+    const groupList = Object.values(groups);
+    // Sort groups by date descending
+    groupList.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+    let html = '';
+    groupList.forEach((g, gi) => {
+      const mktLabel = MARKET_LABELS[(g.market || '').toUpperCase()] || MARKET_LABELS[g.market] || g.market;
+      // Build language badges
+      let langBadges = '';
+      g.items.forEach(h => {
+        const lang = h.language || '?';
+        const st = h.status || '';
+        langBadges += '<span class="adm-lang-badge" data-status="' + esc(st) + '">' + esc(lang) + '</span>';
+      });
+
+      html += '<div class="adm-pub-group" data-pub-group="' + gi + '">';
+      html += '<div class="adm-pub-group-header" data-action="toggle-pub-group" data-pub-group="' + gi + '">';
+      html += '<span class="adm-pub-toggle">&#x25B6;</span>';
+      html += '<span class="adm-pub-date">' + formatDate(g.date) + '</span>';
+      html += '<span class="adm-pub-match">' + esc(g.match) + '</span>';
+      html += '<span class="adm-badge adm-badge-market">' + esc(mktLabel) + '</span>';
+      html += '<div class="adm-pub-group-langs">' + langBadges + '</div>';
+      html += '</div>';
+
+      // Detail table (collapsed by default)
+      if (g.items.length > 0) {
+        html += '<div class="adm-pub-group-detail">';
+        html += '<table class="adm-table"><thead><tr><th>Дата</th><th>Язык</th><th>Статус</th><th>Ошибка</th></tr></thead><tbody>';
+        g.items.forEach(h => {
+          const stCls = h.status === 'ok' ? 'adm-badge-win' : h.status === 'skipped' ? 'adm-badge-pending' : h.status === 'dry_run' ? 'adm-badge-signal' : 'adm-badge-loss';
+          const stLabel = h.status === 'ok' ? 'OK' : h.status === 'skipped' ? 'Пропущено' : h.status === 'dry_run' ? 'Dry Run' : h.status === 'failed' ? 'Ошибка' : esc(h.status || '—');
+          const errText = h.error ? esc(String(h.error).substring(0, 100)) : '';
+          html += '<tr><td>' + formatDate(h.created_at) + '</td><td>' + esc(h.language || '—') + '</td><td><span class="adm-badge ' + stCls + '">' + stLabel + '</span></td><td style="font-size:var(--font-size-xs);color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(h.error || '') + '">' + errText + '</td></tr>';
+        });
+        html += '</tbody></table></div>';
+      }
+
+      html += '</div>';
+    });
     cont.innerHTML = html;
   }
 
@@ -1929,6 +2038,14 @@
       return;
     }
 
+    // Toggle publication group expand/collapse
+    const pubGroupToggle = target.closest('[data-action="toggle-pub-group"]');
+    if (pubGroupToggle) {
+      const groupEl = pubGroupToggle.closest('.adm-pub-group');
+      if (groupEl) groupEl.classList.toggle('open');
+      return;
+    }
+
     // Publish actions
     const previewBtn = target.closest('[data-action="preview-publish"]');
     if (previewBtn) {
@@ -1960,7 +2077,7 @@
       };
       if (getters[key]) {
         _sortRows(_lastMatchesData, _matchSort, key, getters[key]);
-        renderMatchesTable(_lastMatchesData, _lastMatchesData.length);
+        renderMatchesTable(_lastMatchesData, matchState.total);
       }
       return;
     }
@@ -2077,11 +2194,11 @@
       '</tbody></table></div>';
     overlay.appendChild(dlg);
     document.body.appendChild(overlay);
-    const cleanup = () => overlay.remove();
+    const onEsc = (e) => { if (e.key === 'Escape') cleanup(); };
+    const cleanup = () => { document.removeEventListener('keydown', onEsc); overlay.remove(); };
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay || e.target.closest('.adm-modal-close')) cleanup();
     });
-    const onEsc = (e) => { if (e.key === 'Escape') { cleanup(); document.removeEventListener('keydown', onEsc); } };
     document.addEventListener('keydown', onEsc);
   }
 

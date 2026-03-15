@@ -3811,6 +3811,98 @@
           if (betsHistoryState.expanded) await loadBetsHistoryPage();
         }
 
+        // ---- Roadmap progress ----
+        const _roadmapNotified = new Set();
+
+        async function loadRoadmapData() {
+          const container = el('roadmap-progress');
+          const alertEl = el('roadmap-alert');
+          if (!container) return;
+          try {
+            const data = await apiFetchJson('/api/v1/roadmap-progress');
+            const milestones = data?.milestones || {};
+            const overallPct = data?.overall_pct ?? 0;
+            const daysElapsed = data?.days_elapsed ?? 0;
+
+            const labels = {
+              pinnacle_settled: '\uD83D\uDCCA Pinnacle (settled пары)',
+              v3_features_settled: '\uD83E\uDDEC V3 фичи (рассчитано)',
+              stacking_settled: '\uD83E\uDDE0 Stacking (чистые)',
+            };
+
+            // Alert banner for reached milestones
+            if (alertEl) {
+              const reachedLabels = [];
+              for (const [key, m] of Object.entries(milestones)) {
+                if (m.reached) reachedLabels.push(labels[key] || key);
+              }
+              if (reachedLabels.length > 0) {
+                alertEl.className = 'roadmap-alert-banner';
+                alertEl.textContent = '\u2705 Достигнуто: ' + reachedLabels.join(', ');
+                alertEl.classList.remove('is-hidden');
+                for (const name of reachedLabels) {
+                  if (!_roadmapNotified.has(name)) {
+                    _roadmapNotified.add(name);
+                    notify('\uD83C\uDFAF Цель достигнута: ' + name, 'success');
+                  }
+                }
+              } else {
+                alertEl.className = 'is-hidden';
+                alertEl.textContent = '';
+              }
+            }
+
+            function barClass(pct) {
+              if (pct >= 100) return 'bar-green';
+              if (pct >= 50) return 'bar-amber';
+              return 'bar-red';
+            }
+
+            function etaText(m) {
+              if (m.reached) return '\u2705 Достигнуто';
+              if (m.estimated_completion) {
+                const dt = new Date(m.estimated_completion + 'T00:00:00');
+                return '\u23F3 ' + dt.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' });
+              }
+              return '\u2014 нет данных для прогноза';
+            }
+
+            let html = '';
+            for (const [key, m] of Object.entries(milestones)) {
+              const label = labels[key] || key;
+              const extra = (key === 'pinnacle_settled' && m.collected != null)
+                ? ` (собрано: ${m.collected})`
+                : '';
+              html += `
+                <div class="roadmap-milestone">
+                  <div class="roadmap-milestone-header">
+                    <span class="roadmap-milestone-label">${escapeHtml(label)}</span>
+                    <span class="roadmap-milestone-count">${m.current} / ${m.target}${extra}</span>
+                  </div>
+                  <div class="roadmap-bar-track">
+                    <div class="roadmap-bar-fill ${barClass(m.pct)}" style="width: ${Math.min(m.pct, 100)}%"></div>
+                  </div>
+                  <div class="roadmap-milestone-eta">${etaText(m)} \u2022 ${m.pct.toFixed(1)}%</div>
+                </div>
+              `;
+            }
+            html += `
+              <div class="roadmap-overall">
+                <span class="roadmap-overall-label">Общий прогресс \u2022 ${daysElapsed.toFixed(0)} дн.</span>
+                <span class="roadmap-overall-pct">${overallPct.toFixed(1)}%</span>
+              </div>
+            `;
+            container.innerHTML = html;
+
+            const metaEl = el('roadmap-meta');
+            if (metaEl) {
+              metaEl.textContent = 'С 13 марта 2026 \u2022 ' + new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+            }
+          } catch (e) {
+            container.innerHTML = '<div class="text-danger">Ошибка загрузки прогресса</div>';
+          }
+        }
+
         function renderQualityTable(title, rows, columns, options = {}) {
           const showTitle = options?.showTitle !== false;
           if (!rows || rows.length === 0) {
@@ -5745,7 +5837,7 @@
           setSectionBusy(sectionId, true);
           try {
             if (sectionId === 'dashboard') {
-              await Promise.all([loadDashboardData(), loadLiveData()]);
+              await Promise.all([loadDashboardData(), loadLiveData(), loadRoadmapData()]);
             } else if (sectionId === 'info') {
               await Promise.all([loadInfoData()]);
             } else if (sectionId === 'system') {
@@ -6145,6 +6237,10 @@
               return;
             }
             await applyPublishHistoryLimit(actionEl.dataset.limit);
+            return;
+          }
+          if (action === 'refresh-roadmap') {
+            void loadRoadmapData();
             return;
           }
           if (action === 'refresh-quality') {

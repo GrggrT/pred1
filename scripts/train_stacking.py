@@ -35,8 +35,8 @@ from app.core.decimalutils import D  # noqa: E402
 log = get_logger("scripts.train_stacking")
 
 # Feature names expected in feature_flags (written by build_predictions.py)
-# v2: 13 features — added DC-xG (3), removed standings_delta (dead feature in hist_fixtures)
-STACKING_FEATURE_NAMES = [
+# v2: 13 features — Poisson(3) + DC-goals(3) + DC-xG(3) + ELO(1) + FairOdds(3)
+STACKING_FEATURE_NAMES_V2 = [
     "p_home_poisson",
     "p_draw_poisson",
     "p_away_poisson",
@@ -51,6 +51,35 @@ STACKING_FEATURE_NAMES = [
     "fair_draw",
     "fair_away",
 ]
+
+# v3: 30 features — v2(13) + CMP(4) + Market(7) + Performance(4) + Context(3)
+STACKING_FEATURE_NAMES_V3 = STACKING_FEATURE_NAMES_V2 + [
+    # CMP-DC features (Phase 2)
+    "p_home_cmp",
+    "p_draw_cmp",
+    "p_away_cmp",
+    "cmp_nu",
+    # Market features (Phase 3)
+    "odds_movement_home",
+    "odds_movement_draw",
+    "odds_movement_away",
+    "overround",
+    "disagree_home",
+    "disagree_draw",
+    "disagree_away",
+    # Performance features (Phase 3)
+    "xg_overperf_home",
+    "xg_overperf_away",
+    "form_trend_home",
+    "form_trend_away",
+    # Context features (Phase 3)
+    "standings_pts_diff",
+    "standings_rank_diff",
+    "rest_diff",
+]
+
+# Default: use v3 for new training, but support --v2 flag for compatibility
+STACKING_FEATURE_NAMES = STACKING_FEATURE_NAMES_V3
 
 
 async def load_training_data(session, league_id: int | None, min_samples: int):
@@ -243,6 +272,14 @@ def evaluate_predictions(probs: np.ndarray, labels: np.ndarray) -> dict:
 
 
 async def main(args):
+    global STACKING_FEATURE_NAMES
+    if args.v2:
+        STACKING_FEATURE_NAMES = STACKING_FEATURE_NAMES_V2
+        log.info("Using v2 feature set (13 features)")
+    else:
+        STACKING_FEATURE_NAMES = STACKING_FEATURE_NAMES_V3
+        log.info("Using v3 feature set (%d features)", len(STACKING_FEATURE_NAMES_V3))
+
     # 1. Load data
     if args.from_file:
         features, labels = load_training_data_from_file(
@@ -377,6 +414,11 @@ def parse_args():
         "--dry-run",
         action="store_true",
         help="Train and evaluate but don't save to DB",
+    )
+    parser.add_argument(
+        "--v2",
+        action="store_true",
+        help="Use v2 feature set (13 features) instead of v3 (30 features)",
     )
     return parser.parse_args()
 
