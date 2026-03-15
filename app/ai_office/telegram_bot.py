@@ -147,6 +147,98 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Ошибка при запуске контентщика")
 
 
+async def cmd_scout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /scout command — run scout agent on-demand."""
+    if not _is_owner(update):
+        return
+
+    log.info("cmd_scout from user=%s", update.effective_user.id)
+
+    try:
+        from .agents.scout import run as scout_run
+
+        async with SessionLocal() as session:
+            result = await scout_run(session)
+
+        status = result.get("status", "done")
+        if status == "skipped":
+            reason = html.escape(result.get("reason", "no data"))
+            await update.message.reply_text(
+                f"🔍 Scout: нет данных — {reason}",
+                parse_mode="HTML",
+            )
+        elif status == "error":
+            reason = html.escape(result.get("reason", "unknown"))
+            await update.message.reply_text(
+                f"🔍 Scout: ошибка — {reason}",
+                parse_mode="HTML",
+            )
+        # If status == "sent", agent already sent the report via send_to_owner
+    except Exception:
+        log.exception("cmd_scout_error")
+        await update.message.reply_text("❌ Ошибка при запуске скаута")
+
+
+async def cmd_override(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /override command — override scout verdict.
+
+    Usage: /override <fixture_id> <verdict> [reason...]
+    Example: /override 12345 green coach confirmed full squad
+    """
+    if not _is_owner(update):
+        return
+
+    log.info("cmd_override from user=%s", update.effective_user.id)
+
+    args = context.args or []
+    if len(args) < 2:
+        await update.message.reply_text(
+            "Формат: /override &lt;fixture_id&gt; &lt;verdict&gt; [причина]\n"
+            "Пример: /override 12345 green основной состав подтверждён",
+            parse_mode="HTML",
+        )
+        return
+
+    try:
+        fixture_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("❌ fixture_id должен быть числом")
+        return
+
+    new_verdict = args[1].lower().strip()
+    if new_verdict not in ("green", "yellow", "red"):
+        await update.message.reply_text(
+            "❌ verdict должен быть: green, yellow, red"
+        )
+        return
+
+    reason = " ".join(args[2:]) if len(args) > 2 else "manual override"
+
+    try:
+        from .queries import override_scout_verdict
+
+        async with SessionLocal() as session:
+            updated = await override_scout_verdict(
+                session, fixture_id, new_verdict, reason
+            )
+
+        emoji = {"green": "🟢", "yellow": "🟡", "red": "🔴"}.get(new_verdict, "⚪")
+        if updated:
+            await update.message.reply_text(
+                f"✅ Вердикт для fixture {fixture_id} → {emoji} {new_verdict.upper()}\n"
+                f"Причина: {html.escape(reason)}",
+                parse_mode="HTML",
+            )
+        else:
+            await update.message.reply_text(
+                f"⚠️ Scout-отчёт для fixture {fixture_id} не найден",
+                parse_mode="HTML",
+            )
+    except Exception:
+        log.exception("cmd_override_error")
+        await update.message.reply_text("❌ Ошибка при переопределении")
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command — welcome message."""
     if not _is_owner(update):
@@ -176,6 +268,8 @@ def build_bot() -> Application:
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("settled", cmd_settled))
     app.add_handler(CommandHandler("picks", cmd_picks))
+    app.add_handler(CommandHandler("scout", cmd_scout))
+    app.add_handler(CommandHandler("override", cmd_override))
     app.add_handler(CommandHandler("help", cmd_help))
 
     log.info("telegram_bot_built handlers=%d", len(app.handlers[0]))

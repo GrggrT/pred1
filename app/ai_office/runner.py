@@ -1,7 +1,7 @@
 """AI Office runner — main entry point for Docker service.
 
 Runs:
-1. APScheduler with monitor, analyst, and content agents on cron schedules
+1. APScheduler with monitor, analyst, scout, and content agents on cron schedules
 2. Telegram bot polling loop
 """
 
@@ -46,6 +46,19 @@ async def _run_analyst() -> None:
             log.info("scheduled_analyst_done result=%s", result)
     except Exception:
         log.exception("scheduled_analyst_error")
+
+
+async def _run_scout() -> None:
+    """Wrapper to run scout agent with its own DB session."""
+    from app.ai_office.agents.scout import run as scout_run
+
+    log.info("scheduled_scout_start")
+    try:
+        async with SessionLocal() as session:
+            result = await scout_run(session)
+            log.info("scheduled_scout_done result=%s", result)
+    except Exception:
+        log.exception("scheduled_scout_error")
 
 
 async def _run_content_picks() -> None:
@@ -112,6 +125,22 @@ async def main() -> None:
         log.info("scheduler_job_added job=analyst cron=%s", analyst_cron)
     except Exception:
         log.exception("scheduler_cron_parse_failed cron=%s", analyst_cron)
+
+    # Scout agent — contextual match analysis
+    scout_cron = settings.ai_office_scout_cron
+    try:
+        trigger = CronTrigger.from_crontab(scout_cron)
+        scheduler.add_job(
+            _run_scout,
+            trigger=trigger,
+            id="ai_office_scout",
+            max_instances=1,
+            coalesce=True,
+            name="AI Office Scout",
+        )
+        log.info("scheduler_job_added job=scout cron=%s", scout_cron)
+    except Exception:
+        log.exception("scheduler_cron_parse_failed cron=%s", scout_cron)
 
     # Content picks agent — daily predictions post
     content_cron = settings.ai_office_content_picks_cron

@@ -12,7 +12,12 @@ from app.core.logger import get_logger
 from app.data.providers.groq import generate_text
 
 from ..config import CONTENT_PICKS_SYSTEM_PROMPT
-from ..queries import fetch_upcoming_picks, fetch_upcoming_totals, save_report
+from ..queries import (
+    fetch_upcoming_picks,
+    fetch_upcoming_totals,
+    fetch_red_fixture_ids,
+    save_report,
+)
 from .monitor import send_to_owner
 
 log = get_logger("ai_office.content")
@@ -139,14 +144,31 @@ async def run(session: AsyncSession) -> dict[str, Any]:
 
     picks_1x2 = await fetch_upcoming_picks(session)
     picks_totals = await fetch_upcoming_totals(session)
+
+    # Filter out fixtures with RED scout verdicts (not overridden)
+    red_ids = await fetch_red_fixture_ids(session)
+    filtered_count = 0
+    if red_ids:
+        before_1x2 = len(picks_1x2)
+        before_totals = len(picks_totals)
+        picks_1x2 = [p for p in picks_1x2 if p["fixture_id"] not in red_ids]
+        picks_totals = [p for p in picks_totals if p["fixture_id"] not in red_ids]
+        filtered_count = (before_1x2 - len(picks_1x2)) + (before_totals - len(picks_totals))
+        if filtered_count:
+            log.info("content_filtered_red count=%d fixture_ids=%s",
+                     filtered_count, red_ids)
+
     total_count = len(picks_1x2) + len(picks_totals)
 
     if total_count == 0:
         log.info("content_no_picks — skipping")
-        return {"status": "skipped", "reason": "no upcoming picks"}
+        reason = "no upcoming picks"
+        if filtered_count:
+            reason += f" ({filtered_count} filtered by scout RED)"
+        return {"status": "skipped", "reason": reason}
 
-    log.info("content_picks found=%d (1x2=%d, totals=%d)",
-             total_count, len(picks_1x2), len(picks_totals))
+    log.info("content_picks found=%d (1x2=%d, totals=%d, filtered_red=%d)",
+             total_count, len(picks_1x2), len(picks_totals), filtered_count)
 
     # Try AI post via Groq
     post = None

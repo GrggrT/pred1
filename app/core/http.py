@@ -12,6 +12,7 @@ _openweather_client: httpx.AsyncClient | None = None
 _telegram_client: httpx.AsyncClient | None = None
 _deepl_client: httpx.AsyncClient | None = None
 _groq_client: httpx.AsyncClient | None = None
+_gemini_client: httpx.AsyncClient | None = None
 _assets_client: httpx.AsyncClient | None = None
 _telegram_token: str | None = None
 _deepl_base: str | None = None
@@ -93,6 +94,18 @@ def groq_client() -> httpx.AsyncClient:
     return _groq_client
 
 
+def gemini_client() -> httpx.AsyncClient:
+    global _gemini_client
+    if _gemini_client is None or _gemini_client.is_closed:
+        _gemini_client = httpx.AsyncClient(
+            base_url="https://generativelanguage.googleapis.com/v1beta",
+            headers={"Content-Type": "application/json"},
+            timeout=httpx.Timeout(60.0),
+            limits=_http_limits(),
+        )
+    return _gemini_client
+
+
 def assets_client() -> httpx.AsyncClient:
     global _assets_client
     if _assets_client is None or _assets_client.is_closed:
@@ -113,10 +126,12 @@ async def init_http_clients() -> None:
         deepl_client()
     if settings.groq_enabled and settings.groq_api_key:
         groq_client()
+    if settings.gemini_api_key:
+        gemini_client()
 
 
 async def close_http_clients() -> None:
-    global _api_football_client, _openweather_client, _telegram_client, _deepl_client, _groq_client, _assets_client, _telegram_token, _deepl_base, _groq_base
+    global _api_football_client, _openweather_client, _telegram_client, _deepl_client, _groq_client, _gemini_client, _assets_client, _telegram_token, _deepl_base, _groq_base
     if _api_football_client is not None and not _api_football_client.is_closed:
         await _api_football_client.aclose()
     if _openweather_client is not None and not _openweather_client.is_closed:
@@ -127,6 +142,8 @@ async def close_http_clients() -> None:
         await _deepl_client.aclose()
     if _groq_client is not None and not _groq_client.is_closed:
         await _groq_client.aclose()
+    if _gemini_client is not None and not _gemini_client.is_closed:
+        await _gemini_client.aclose()
     if _assets_client is not None and not _assets_client.is_closed:
         await _assets_client.aclose()
     _api_football_client = None
@@ -134,6 +151,7 @@ async def close_http_clients() -> None:
     _telegram_client = None
     _deepl_client = None
     _groq_client = None
+    _gemini_client = None
     _assets_client = None
     _telegram_token = None
     _deepl_base = None

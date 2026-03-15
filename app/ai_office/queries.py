@@ -261,6 +261,120 @@ async def fetch_settled_24h(session: AsyncSession) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Scout queries
+# ---------------------------------------------------------------------------
+
+async def fetch_scout_matches(session: AsyncSession) -> list[dict[str, Any]]:
+    """Fetch upcoming 1X2 predictions for scout analysis (next 36 hours)."""
+    result = await session.execute(text("""
+        SELECT p.id as prediction_id, '1X2' as market,
+               p.selection_code as selection, p.initial_odd as odd,
+               p.confidence,
+               p.feature_flags,
+               f.id as fixture_id, f.kickoff,
+               ht.name as home_team, att.name as away_team,
+               l.name as league
+        FROM predictions p
+        JOIN fixtures f ON f.id = p.fixture_id
+        JOIN teams ht ON ht.id = f.home_team_id
+        JOIN teams att ON att.id = f.away_team_id
+        JOIN leagues l ON l.id = f.league_id
+        WHERE f.status = 'NS'
+          AND f.kickoff BETWEEN now() AND now() + interval '36 hours'
+          AND p.selection_code != 'SKIP'
+        ORDER BY f.kickoff
+    """))
+    return [dict(r) for r in result.mappings().all()]
+
+
+async def save_scout_report(
+    session: AsyncSession,
+    *,
+    fixture_id: int,
+    prediction_id: int | None,
+    verdict: str,
+    report_text: str,
+    factors: dict | None = None,
+    model_selection: str | None = None,
+    model_odd: float | None = None,
+) -> int:
+    """Upsert a scout report into scout_reports. Returns report id."""
+    import json
+
+    result = await session.execute(
+        text("""
+            INSERT INTO scout_reports
+                (fixture_id, prediction_id, verdict, report_text, factors,
+                 model_selection, model_odd)
+            VALUES (:fixture_id, :prediction_id, :verdict, :report_text,
+                    CAST(:factors AS jsonb), :model_selection, :model_odd)
+            ON CONFLICT (fixture_id) DO UPDATE SET
+                verdict = EXCLUDED.verdict,
+                report_text = EXCLUDED.report_text,
+                factors = EXCLUDED.factors,
+                prediction_id = EXCLUDED.prediction_id,
+                model_selection = EXCLUDED.model_selection,
+                model_odd = EXCLUDED.model_odd,
+                created_at = now()
+            RETURNING id
+        """),
+        {
+            "fixture_id": fixture_id,
+            "prediction_id": prediction_id,
+            "verdict": verdict,
+            "report_text": report_text,
+            "factors": json.dumps(factors or {}),
+            "model_selection": model_selection,
+            "model_odd": model_odd,
+        },
+    )
+    await session.commit()
+    report_id = result.scalar()
+    log.info(
+        "scout_report_saved fixture=%s verdict=%s id=%s",
+        fixture_id, verdict, report_id,
+    )
+    return report_id
+
+
+async def fetch_red_fixture_ids(session: AsyncSession) -> set[int]:
+    """Fetch fixture IDs with active RED scout verdicts (no override)."""
+    result = await session.execute(text("""
+        SELECT fixture_id FROM scout_reports
+        WHERE verdict = 'red'
+          AND override_verdict IS NULL
+          AND created_at > now() - interval '48 hours'
+    """))
+    return {row[0] for row in result.fetchall()}
+
+
+async def override_scout_verdict(
+    session: AsyncSession,
+    fixture_id: int,
+    new_verdict: str,
+    reason: str,
+) -> bool:
+    """Override a scout verdict. Returns True if a row was updated."""
+    result = await session.execute(
+        text("""
+            UPDATE scout_reports
+            SET override_verdict = :verdict,
+                override_reason = :reason
+            WHERE fixture_id = :fixture_id
+        """),
+        {"fixture_id": fixture_id, "verdict": new_verdict, "reason": reason},
+    )
+    await session.commit()
+    updated = result.rowcount > 0
+    if updated:
+        log.info(
+            "scout_override fixture=%s new_verdict=%s reason=%s",
+            fixture_id, new_verdict, reason,
+        )
+    return updated
+
+
+# ---------------------------------------------------------------------------
 # Content queries
 # ---------------------------------------------------------------------------
 
