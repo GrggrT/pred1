@@ -46,11 +46,16 @@
 
 ## Phase 2: Верификация + новые фичи
 
-### 2.1 Re-train stacking model [NOT STARTED — BLOCKER]
-- Переобучить stacking с 15 features на production data
-- **Критично**: без переобучки старая модель ожидает 13 features, новый код посылает 15
-- Скрипт: `python scripts/train_stacking.py --from-file results/training_data.json`
-- Перед этим: `python scripts/generate_training_data.py --leagues 39,78,140,135,61`
+### 2.1 Re-train stacking model [DONE — 2026-03-16]
+- Regenerated training data with v5 features (17 features): 5192 examples across 4 leagues
+- Trained global + per-league models (39, 78, 140, 135) via `--batch-leagues`
+- Validation metrics:
+  - Global: RPS=0.1892, LogLoss=0.9755, Brier=0.1939
+  - League 39: RPS=0.2093, League 78: RPS=0.1958
+  - League 140: RPS=0.1926, League 135: RPS=0.1976
+- Fixed train_stacking.py: V5 (17) as default, V3 (34) opt-in via `--v3`, V2 (13) via `--v2`
+- Verified build_predictions loads per-league models (features=17, T=1.20)
+- Dirichlet calibrator: insufficient data (66 < 200 settled predictions), will train later
 
 ### 2.2 Backtest и сравнение метрик [NOT STARTED]
 - BACKTEST_KIND=true на 3 месяца

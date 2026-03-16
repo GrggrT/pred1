@@ -82,8 +82,16 @@ STACKING_FEATURE_NAMES_V3 = STACKING_FEATURE_NAMES + [
     "rest_diff",
 ]
 
-# Default: use v3 for new training, but support --v2 flag for compatibility
-STACKING_FEATURE_NAMES = STACKING_FEATURE_NAMES_V3
+# v2: old 13-feature set (for backward compatibility)
+STACKING_FEATURE_NAMES_V2 = [
+    "p_home_poisson", "p_draw_poisson", "p_away_poisson",
+    "p_home_dc", "p_draw_dc", "p_away_dc",
+    "p_home_dc_xg", "p_draw_dc_xg", "p_away_dc_xg",
+    "elo_diff", "fair_home", "fair_draw", "fair_away",
+]
+
+# Default: use v5 (17 features). Use --v3 for extended 34-feature set (needs CMP/market data).
+STACKING_FEATURE_NAMES_V5 = STACKING_FEATURE_NAMES  # alias
 
 
 async def load_training_data(session, league_id: int | None, min_samples: int,
@@ -369,10 +377,13 @@ async def main(args):
     global STACKING_FEATURE_NAMES
     if args.v2:
         STACKING_FEATURE_NAMES = STACKING_FEATURE_NAMES_V2
-        log.info("Using v2 feature set (13 features)")
-    else:
+        log.info("Using v2 feature set (%d features)", len(STACKING_FEATURE_NAMES_V2))
+    elif getattr(args, "v3", False):
         STACKING_FEATURE_NAMES = STACKING_FEATURE_NAMES_V3
         log.info("Using v3 feature set (%d features)", len(STACKING_FEATURE_NAMES_V3))
+    else:
+        STACKING_FEATURE_NAMES = STACKING_FEATURE_NAMES_V5
+        log.info("Using v5 feature set (%d features)", len(STACKING_FEATURE_NAMES_V5))
 
     # 1. Load data
     if args.from_file:
@@ -554,6 +565,11 @@ def parse_args():
         "--v2",
         action="store_true",
         help="Use v2 feature set (13 features) instead of v5 (17 features)",
+    )
+    parser.add_argument(
+        "--v3",
+        action="store_true",
+        help="Use v3 feature set (34 features: v5 + CMP + Market + Performance + Context)",
     )
     parser.add_argument(
         "--batch-leagues",
