@@ -15,6 +15,14 @@ MONITOR_THRESHOLDS = {
     "errors_24h_warn": 3,          # > N errors in 24h → critical
 }
 
+# Expected max hours between agent reports (for agent health monitoring)
+AGENT_EXPECTED_INTERVALS = {
+    "news": 6,          # every 4h → warn if > 6h
+    "analyst": 26,      # daily at 08:00 → warn if > 26h
+    "content": 26,      # daily at 12:00 → warn if > 26h
+    "researcher": 192,  # weekly → warn if > 8 days
+}
+
 # ---------------------------------------------------------------------------
 # System prompts
 # ---------------------------------------------------------------------------
@@ -32,7 +40,8 @@ MONITOR_SYSTEM_PROMPT = (
     "3. unsettled > 10 → ⚠️ Settlement отстаёт\n"
     "4. API quota > 80% → ⚠️ API quota\n"
     "5. pinnacle_24h = 0 → ⚠️ Pinnacle sync остановлен\n"
-    "6. errors_24h > 3 → 🔴 Много ошибок\n\n"
+    "6. errors_24h > 3 → 🔴 Много ошибок\n"
+    "7. AI agents stale → ⚠️ Агент не запускался по расписанию\n\n"
     "Формат алерта:\n"
     "🛡️ Мониторинг [время UTC]\n"
     "[Emoji] [Проблема]: [описание, 1 предложение]\n"

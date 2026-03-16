@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logger import get_logger
-from .config import MONITOR_THRESHOLDS
+from .config import MONITOR_THRESHOLDS, AGENT_EXPECTED_INTERVALS
 
 log = get_logger("ai_office.queries")
 
@@ -157,8 +157,47 @@ async def check_errors_24h(session: AsyncSession) -> dict[str, Any]:
     }
 
 
+async def check_agent_freshness(session: AsyncSession) -> dict[str, Any]:
+    """Check #7: Are AI Office agents running on schedule?"""
+    result = await session.execute(text("""
+        SELECT agent,
+               EXTRACT(EPOCH FROM now() - MAX(created_at)) / 3600 AS hours_ago
+        FROM ai_office_reports
+        GROUP BY agent
+    """))
+    rows = {r["agent"]: float(r["hours_ago"]) for r in result.mappings().all()}
+
+    stale: list[str] = []
+    for agent_name, max_hours in AGENT_EXPECTED_INTERVALS.items():
+        hours = rows.get(agent_name)
+        if hours is None:
+            stale.append(f"{agent_name}(never)")
+        elif hours > max_hours:
+            stale.append(f"{agent_name}({hours:.0f}h)")
+
+    if not stale:
+        return {
+            "name": "agent_freshness",
+            "label": "AI Agents",
+            "value": f"{len(rows)} active",
+            "threshold": "per-agent interval",
+            "severity": "medium",
+            "ok": True,
+            "detail": f"All {len(AGENT_EXPECTED_INTERVALS)} tracked agents on schedule",
+        }
+    return {
+        "name": "agent_freshness",
+        "label": "AI Agents",
+        "value": f"{len(stale)} stale",
+        "threshold": "per-agent interval",
+        "severity": "medium",
+        "ok": False,
+        "detail": f"Stale agents: {', '.join(stale)}",
+    }
+
+
 async def run_all_checks(session: AsyncSession) -> list[dict[str, Any]]:
-    """Run all 6 health checks and return results."""
+    """Run all 7 health checks and return results."""
     checks = []
     for check_fn in [
         check_sync_freshness,
@@ -167,6 +206,7 @@ async def run_all_checks(session: AsyncSession) -> list[dict[str, Any]]:
         check_api_usage,
         check_pinnacle_odds,
         check_errors_24h,
+        check_agent_freshness,
     ]:
         try:
             result = await check_fn(session)

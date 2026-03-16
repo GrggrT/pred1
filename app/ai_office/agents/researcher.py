@@ -80,15 +80,9 @@ async def run(session: AsyncSession) -> dict[str, Any]:
     report_text = raw_report.strip()
     log.info("researcher_report_generated len=%d", len(report_text))
 
-    # Send to Telegram
+    # Send to Telegram (send_to_owner auto-splits long messages)
     header = f"📚 <b>Weekly Research — {week_label}</b>\n\n"
-    # Truncate for Telegram (4096 char limit)
-    tg_text = report_text
-    max_len = 4096 - len(header) - 50
-    if len(tg_text) > max_len:
-        tg_text = tg_text[:max_len] + "\n\n[...обрезано]"
-
-    sent = await send_to_owner(header + tg_text)
+    sent = await send_to_owner(header + report_text)
 
     # Save report once (after telegram attempt)
     await save_report(

@@ -46,7 +46,13 @@ def _format_checks_simple(checks: list[dict[str, Any]]) -> str:
 
 
 async def send_to_owner(text_msg: str) -> bool:
-    """Send a message to the bot owner via Telegram API."""
+    """Send a message to the bot owner via Telegram API.
+
+    Handles messages longer than 4096 chars by splitting into parts.
+    Retries once on transient failures (5xx, timeout).
+    """
+    import asyncio
+
     owner_id = (settings.telegram_owner_id or "").strip()
     if not owner_id:
         log.warning("TELEGRAM_OWNER_ID not set, cannot send alert")
@@ -57,25 +63,66 @@ async def send_to_owner(text_msg: str) -> bool:
         log.warning("TELEGRAM_BOT_TOKEN not set, cannot send alert")
         return False
 
+    TG_MAX = 4096
+    parts = _split_message(text_msg, TG_MAX) if len(text_msg) > TG_MAX else [text_msg]
+
     try:
         from app.core.http import telegram_client
 
         client = telegram_client()
+        all_ok = True
+
+        for i, part in enumerate(parts):
+            ok = await _send_one(client, owner_id, part)
+            if not ok:
+                # Retry once after 2s
+                await asyncio.sleep(2)
+                ok = await _send_one(client, owner_id, part)
+            if not ok:
+                all_ok = False
+                log.error("telegram_send_failed part=%d/%d", i + 1, len(parts))
+
+        if all_ok:
+            log.info("telegram_alert_sent to=%s len=%d parts=%d", owner_id, len(text_msg), len(parts))
+        return all_ok
+    except Exception:
+        log.exception("telegram_alert_error")
+        return False
+
+
+def _split_message(text: str, max_len: int = 4096) -> list[str]:
+    """Split a long message into Telegram-safe chunks at line boundaries."""
+    parts: list[str] = []
+    while text:
+        if len(text) <= max_len:
+            parts.append(text)
+            break
+        # Find last newline within max_len
+        split_at = text.rfind("\n", 0, max_len)
+        if split_at <= 0:
+            split_at = max_len
+        parts.append(text[:split_at])
+        text = text[split_at:].lstrip("\n")
+    return parts
+
+
+async def _send_one(client, chat_id: str, text: str) -> bool:
+    """Send a single Telegram message. Returns True on success."""
+    try:
         resp = await client.post(
             "/sendMessage",
             json={
-                "chat_id": owner_id,
-                "text": text_msg,
+                "chat_id": chat_id,
+                "text": text,
                 "parse_mode": "HTML",
             },
         )
         if resp.status_code == 200:
-            log.info("telegram_alert_sent to=%s len=%d", owner_id, len(text_msg))
             return True
-        log.error("telegram_alert_failed status=%s body=%s", resp.status_code, resp.text[:300])
+        log.error("telegram_send_error status=%s body=%s", resp.status_code, resp.text[:300])
         return False
     except Exception:
-        log.exception("telegram_alert_error")
+        log.exception("telegram_send_exception")
         return False
 
 
