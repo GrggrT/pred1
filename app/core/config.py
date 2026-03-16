@@ -204,6 +204,7 @@ class Settings(BaseSettings):
     elo_home_advantage: int = Field(default=65, alias="ELO_HOME_ADVANTAGE")
     elo_k_factor: int = Field(default=20, alias="ELO_K_FACTOR")
     elo_regression_factor: Decimal = Field(default=Decimal("0.67"), alias="ELO_REGRESSION_FACTOR")
+    elo_use_xg_diff: bool = Field(default=False, alias="ELO_USE_XG_DIFF")
 
     enable_elo: bool = Field(default=True, alias="ENABLE_ELO")
     enable_venue: bool = Field(default=True, alias="ENABLE_VENUE")
@@ -212,7 +213,9 @@ class Settings(BaseSettings):
     enable_class: bool = Field(default=True, alias="ENABLE_CLASS")
     market_diff_threshold: Decimal = Field(default=Decimal("0.15"), alias="MARKET_DIFF_THRESHOLD")
     dc_use_xg: bool = Field(default=True, alias="DC_USE_XG")
+    dc_auto_tune_xi: bool = Field(default=True, alias="DC_AUTO_TUNE_XI")
     use_stacking: bool = Field(default=True, alias="USE_STACKING")
+    stacking_temperature: float = Field(default=1.2, alias="STACKING_TEMPERATURE")
     use_dirichlet_calib: bool = Field(default=False, alias="USE_DIRICHLET_CALIB")
     enable_rest_adjustment: bool = Field(default=True, alias="ENABLE_REST_ADJUSTMENT")
     enable_kelly: bool = Field(default=False, alias="ENABLE_KELLY")

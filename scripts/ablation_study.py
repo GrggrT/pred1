@@ -216,7 +216,10 @@ STACKING_FEATURE_NAMES = [
     "p_home_dc", "p_draw_dc", "p_away_dc",
     "p_home_dc_xg", "p_draw_dc_xg", "p_away_dc_xg",
     "elo_diff",
-    "fair_home", "fair_draw", "fair_away",
+    "fair_delta",
+    "xg_momentum_home", "xg_momentum_away",
+    "rest_advantage", "league_pos_delta",
+    "h2h_draw_rate", "h2h_goals_avg",
 ]
 
 
@@ -654,9 +657,7 @@ def walk_forward_evaluate(
                         "p_draw_dc_xg": dc_xg[1],
                         "p_away_dc_xg": dc_xg[2],
                         "elo_diff": elo_diff,
-                        "fair_home": odds.get("fair_home", 0.0),
-                        "fair_draw": odds.get("fair_draw", 0.0),
-                        "fair_away": odds.get("fair_away", 0.0),
+                        "fair_delta": odds.get("fair_home", 0.0) - odds.get("fair_away", 0.0),
                     }
                     p_h, p_d, p_a = _stacking_predict(features, stacking_model)
                 elif dc_probs is not None:

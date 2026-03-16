@@ -35,8 +35,8 @@ from app.core.decimalutils import D  # noqa: E402
 log = get_logger("scripts.train_stacking")
 
 # Feature names expected in feature_flags (written by build_predictions.py)
-# v2: 13 features — Poisson(3) + DC-goals(3) + DC-xG(3) + ELO(1) + FairOdds(3)
-STACKING_FEATURE_NAMES_V2 = [
+# v5: 17 features — Poisson(3) + DC-goals(3) + DC-xG(3) + ELO(1) + fair_delta + xG_momentum(2) + rest + league_pos + H2H(2)
+STACKING_FEATURE_NAMES = [
     "p_home_poisson",
     "p_draw_poisson",
     "p_away_poisson",
@@ -47,13 +47,17 @@ STACKING_FEATURE_NAMES_V2 = [
     "p_draw_dc_xg",
     "p_away_dc_xg",
     "elo_diff",
-    "fair_home",
-    "fair_draw",
-    "fair_away",
+    "fair_delta",
+    "xg_momentum_home",
+    "xg_momentum_away",
+    "rest_advantage",
+    "league_pos_delta",
+    "h2h_draw_rate",
+    "h2h_goals_avg",
 ]
 
-# v3: 30 features — v2(13) + CMP(4) + Market(7) + Performance(4) + Context(3)
-STACKING_FEATURE_NAMES_V3 = STACKING_FEATURE_NAMES_V2 + [
+# v3: 34 features — v5(17) + CMP(4) + Market(7) + Performance(4) + Context(3) — NOT USED YET
+STACKING_FEATURE_NAMES_V3 = STACKING_FEATURE_NAMES + [
     # CMP-DC features (Phase 2)
     "p_home_cmp",
     "p_draw_cmp",
@@ -82,12 +86,18 @@ STACKING_FEATURE_NAMES_V3 = STACKING_FEATURE_NAMES_V2 + [
 STACKING_FEATURE_NAMES = STACKING_FEATURE_NAMES_V3
 
 
-async def load_training_data(session, league_id: int | None, min_samples: int):
-    """Load settled predictions with base model probabilities from feature_flags."""
+async def load_training_data(session, league_id: int | None, min_samples: int,
+                             min_hours_before_kickoff: float = 2.0):
+    """Load settled predictions with base model probabilities from feature_flags.
+
+    Args:
+        min_hours_before_kickoff: Exclude predictions made less than this many hours
+            before kickoff to prevent target leakage from near-closing odds (default: 2h).
+    """
     from sqlalchemy import text
 
     league_filter = ""
-    params: dict = {}
+    params: dict = {"min_hours": min_hours_before_kickoff}
     if league_id is not None:
         league_filter = "AND f.league_id = :lid"
         params["lid"] = league_id
@@ -101,7 +111,9 @@ async def load_training_data(session, league_id: int | None, min_samples: int):
                 p.status,
                 f.home_goals,
                 f.away_goals,
-                f.league_id
+                f.league_id,
+                f.kickoff,
+                p.created_at
             FROM predictions p
             JOIN fixtures f ON f.id = p.fixture_id
             WHERE p.status IN ('WIN', 'LOSS')
@@ -109,6 +121,7 @@ async def load_training_data(session, league_id: int | None, min_samples: int):
               AND p.feature_flags IS NOT NULL
               AND f.home_goals IS NOT NULL
               AND f.away_goals IS NOT NULL
+              AND (f.kickoff - p.created_at) >= make_interval(hours => :min_hours)
               {league_filter}
             ORDER BY f.kickoff ASC
             """
@@ -219,20 +232,30 @@ def load_training_data_from_file(filepath: str, league_id: int | None, min_sampl
     return np.array(features_list), np.array(labels_list)
 
 
-async def save_stacking_params(session, model, league_id: int | None, n_train: int, metrics: dict):
-    """Save trained model to DB via stacking service."""
+async def save_stacking_params(
+    session, model, scaler, league_id: int | None, n_train: int, metrics: dict,
+    model_type: str = "logistic", xgb_model_json: str | None = None,
+):
+    """Save trained model + scaler to DB via stacking service."""
     from app.services.stacking import save_stacking_model
 
-    await save_stacking_model(
-        session,
-        coefficients=model.coef_,
-        intercept=model.intercept_,
+    kwargs = dict(
         feature_names=STACKING_FEATURE_NAMES,
         league_id=league_id,
         n_samples=n_train,
         val_rps=metrics.get("rps", 0.0),
         val_logloss=metrics.get("logloss", 0.0),
+        model_type=model_type,
+        scaler_mean=scaler.mean_ if scaler is not None else None,
+        scaler_scale=scaler.scale_ if scaler is not None else None,
     )
+    if model_type == "logistic":
+        kwargs["coefficients"] = model.coef_
+        kwargs["intercept"] = model.intercept_
+    elif model_type == "xgboost":
+        kwargs["xgb_model_json"] = xgb_model_json
+
+    await save_stacking_model(session, **kwargs)
     await session.commit()
 
 
@@ -271,6 +294,77 @@ def evaluate_predictions(probs: np.ndarray, labels: np.ndarray) -> dict:
     }
 
 
+def _train_logistic(X_train, y_train, args):
+    """Train LogisticRegression model."""
+    try:
+        from sklearn.linear_model import LogisticRegression
+    except ImportError:
+        log.error("scikit-learn not installed. Run: pip install scikit-learn>=1.4.0")
+        return None
+
+    model = LogisticRegression(
+        C=args.c,
+        penalty="l2",
+        max_iter=1000,
+        solver="lbfgs",
+    )
+    model.fit(X_train, y_train)
+    log.info("LogisticRegression trained. Classes: %s", model.classes_.tolist())
+    log.info("Coefficients shape: %s", model.coef_.shape)
+    return model
+
+
+def _train_xgboost(X_train, y_train, X_val, y_val, args):
+    """Train XGBoost model. Returns (model, model_json_string)."""
+    try:
+        from xgboost import XGBClassifier
+    except ImportError:
+        log.error("xgboost not installed. Run: pip install xgboost>=2.0.0")
+        return None, None
+
+    import os
+    import tempfile
+
+    model = XGBClassifier(
+        objective="multi:softprob",
+        num_class=3,
+        n_estimators=args.n_estimators,
+        max_depth=args.max_depth,
+        learning_rate=args.learning_rate,
+        min_child_weight=5,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        reg_alpha=0.1,
+        reg_lambda=1.0,
+        eval_metric="mlogloss",
+        random_state=42,
+        verbosity=0,
+    )
+    model.fit(
+        X_train, y_train,
+        eval_set=[(X_val, y_val)],
+        verbose=False,
+    )
+    log.info(
+        "XGBoost trained. n_estimators=%d max_depth=%d best_iteration=%s",
+        args.n_estimators, args.max_depth,
+        getattr(model, "best_iteration", "N/A"),
+    )
+
+    # Serialize booster to JSON for DB storage
+    fd, path = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    try:
+        model.get_booster().save_model(path)
+        with open(path) as f:
+            xgb_model_json = f.read()
+    finally:
+        os.unlink(path)
+
+    log.info("XGBoost model serialized: %d chars", len(xgb_model_json))
+    return model, xgb_model_json
+
+
 async def main(args):
     global STACKING_FEATURE_NAMES
     if args.v2:
@@ -307,25 +401,37 @@ async def main(args):
         log.error("Training set too small (%d). Need at least 30.", len(X_train))
         return
 
-    # 3. Train
+    # 3. Feature scaling (StandardScaler) — normalizes elo_diff, rest_advantage etc.
     try:
-        from sklearn.linear_model import LogisticRegression
+        from sklearn.preprocessing import StandardScaler
     except ImportError:
         log.error("scikit-learn not installed. Run: pip install scikit-learn>=1.4.0")
         return
 
-    model = LogisticRegression(
-        C=args.c,
-        penalty="l2",
-        max_iter=1000,
-        solver="lbfgs",
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
+    log.info(
+        "StandardScaler: mean range [%.3f, %.3f], scale range [%.3f, %.3f]",
+        scaler.mean_.min(), scaler.mean_.max(),
+        scaler.scale_.min(), scaler.scale_.max(),
     )
-    model.fit(X_train, y_train)
-    log.info("Model trained. Classes: %s", model.classes_.tolist())
-    log.info("Coefficients shape: %s", model.coef_.shape)
 
-    # 4. Evaluate on validation
-    probs_val = model.predict_proba(X_val)
+    model_type = getattr(args, "model_type", "logistic")
+    xgb_model_json = None
+
+    # 4. Train
+    if model_type == "xgboost":
+        model, xgb_model_json = _train_xgboost(X_train_scaled, y_train, X_val_scaled, y_val, args)
+        if model is None:
+            return
+    else:
+        model = _train_logistic(X_train_scaled, y_train, args)
+        if model is None:
+            return
+
+    # 5. Evaluate on validation
+    probs_val = model.predict_proba(X_val_scaled)
     metrics_val = evaluate_predictions(probs_val, y_val)
     log.info(
         "Validation: RPS=%.4f Brier=%.4f LogLoss=%.4f n=%d",
@@ -336,7 +442,7 @@ async def main(args):
     )
 
     # Also evaluate on train for comparison
-    probs_train = model.predict_proba(X_train)
+    probs_train = model.predict_proba(X_train_scaled)
     metrics_train = evaluate_predictions(probs_train, y_train)
     log.info(
         "Train:      RPS=%.4f Brier=%.4f LogLoss=%.4f n=%d",
@@ -346,15 +452,22 @@ async def main(args):
         metrics_train["n"],
     )
 
-    # 5. Print feature importance
-    print("\n=== Feature Importance ===")
-    for i, name in enumerate(STACKING_FEATURE_NAMES):
-        coefs = model.coef_[:, i]
-        print(f"  {name:25s}  H={coefs[0]:+.4f}  D={coefs[1]:+.4f}  A={coefs[2]:+.4f}")
+    # 6. Print feature importance
+    print(f"\n=== Feature Importance ({model_type}) ===")
+    if model_type == "logistic":
+        for i, name in enumerate(STACKING_FEATURE_NAMES):
+            coefs = model.coef_[:, i]
+            print(f"  {name:25s}  H={coefs[0]:+.4f}  D={coefs[1]:+.4f}  A={coefs[2]:+.4f}")
+        print(f"\nIntercept:  H={model.intercept_[0]:+.4f}  D={model.intercept_[1]:+.4f}  A={model.intercept_[2]:+.4f}")
+    elif model_type == "xgboost":
+        importance = model.get_booster().get_score(importance_type="gain")
+        sorted_imp = sorted(importance.items(), key=lambda x: -x[1])
+        for fname, gain in sorted_imp:
+            print(f"  {fname:25s}  gain={gain:.2f}")
+        if not sorted_imp:
+            print("  (no feature importance available)")
 
-    print(f"\nIntercept:  H={model.intercept_[0]:+.4f}  D={model.intercept_[1]:+.4f}  A={model.intercept_[2]:+.4f}")
-
-    # 6. Save coefficients
+    # 7. Save
     if args.dry_run:
         log.info("Dry run — not saving to DB.")
     else:
@@ -364,21 +477,29 @@ async def main(args):
             await save_stacking_params(
                 session,
                 model,
+                scaler,
                 league_id=args.league_id,
                 n_train=len(X_train),
                 metrics=metrics_val,
+                model_type=model_type,
+                xgb_model_json=xgb_model_json,
             )
-            log.info("Model saved to model_params (scope='stacking').")
+            log.info("Model saved to model_params (scope='stacking', type=%s).", model_type)
 
-    # 7. Print summary
+    # 8. Print summary
     print("\n=== Summary ===")
+    print(f"Model type:         {model_type}")
     print(f"Training samples:   {len(X_train)}")
     print(f"Validation samples: {len(X_val)}")
     print(f"Validation RPS:     {metrics_val['rps']:.4f}")
     print(f"Validation LogLoss: {metrics_val['logloss']:.4f}")
     print(f"Validation Brier:   {metrics_val['brier']:.4f}")
     print(f"League ID:          {args.league_id or 'global'}")
-    print(f"Regularization C:   {args.c}")
+    if model_type == "logistic":
+        print(f"Regularization C:   {args.c}")
+    elif model_type == "xgboost":
+        print(f"n_estimators:       {args.n_estimators}")
+        print(f"max_depth:          {args.max_depth}")
     print(f"Source:             {'file: ' + args.from_file if args.from_file else 'database'}")
 
 
@@ -405,11 +526,25 @@ def parse_args():
         help="Minimum settled predictions required (default: 100)",
     )
     parser.add_argument(
+        "--model-type",
+        type=str,
+        default="logistic",
+        choices=["logistic", "xgboost"],
+        help="Model type: logistic (softmax regression) or xgboost (gradient-boosted trees)",
+    )
+    parser.add_argument(
         "--c",
         type=float,
         default=1.0,
         help="Regularization parameter C for LogisticRegression (default: 1.0)",
     )
+    # XGBoost hyperparameters
+    parser.add_argument("--n-estimators", type=int, default=100,
+                        help="Number of boosting rounds for XGBoost (default: 100)")
+    parser.add_argument("--max-depth", type=int, default=3,
+                        help="Max tree depth for XGBoost (default: 3)")
+    parser.add_argument("--learning-rate", type=float, default=0.1,
+                        help="Learning rate for XGBoost (default: 0.1)")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -418,11 +553,50 @@ def parse_args():
     parser.add_argument(
         "--v2",
         action="store_true",
-        help="Use v2 feature set (13 features) instead of v3 (30 features)",
+        help="Use v2 feature set (13 features) instead of v5 (17 features)",
+    )
+    parser.add_argument(
+        "--batch-leagues",
+        type=str,
+        default=None,
+        help="Train global + per-league models in one run. Comma-separated league IDs "
+             "(e.g. '39,78,140,135,61'). Requires --from-file.",
     )
     return parser.parse_args()
 
 
+async def batch_train(args):
+    """Train global model + per-league models in a single run."""
+    if not args.from_file:
+        log.error("--batch-leagues requires --from-file")
+        return
+
+    league_ids = [int(x.strip()) for x in args.batch_leagues.split(",")]
+    log.info("Batch training: global + %d leagues: %s", len(league_ids), league_ids)
+
+    # Train global model first
+    print("\n" + "=" * 60)
+    print("=== Training GLOBAL model ===")
+    print("=" * 60)
+    args_copy = argparse.Namespace(**vars(args))
+    args_copy.league_id = None
+    args_copy.batch_leagues = None
+    await main(args_copy)
+
+    # Train per-league models
+    for lid in league_ids:
+        print("\n" + "=" * 60)
+        print(f"=== Training league {lid} model ===")
+        print("=" * 60)
+        args_copy = argparse.Namespace(**vars(args))
+        args_copy.league_id = lid
+        args_copy.batch_leagues = None
+        await main(args_copy)
+
+
 if __name__ == "__main__":
     args = parse_args()
-    asyncio.run(main(args))
+    if args.batch_leagues:
+        asyncio.run(batch_train(args))
+    else:
+        asyncio.run(main(args))

@@ -91,8 +91,68 @@ def load_league_matches(conn, league_id: int, from_date: str, to_date: str) -> l
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def _remove_overround_shin_float(oh: float, od: float, oa: float) -> tuple[float, float, float]:
+    """Shin's method (float version) for overround removal in training data.
+
+    Accounts for non-uniform margin allocation: bookmakers typically
+    apply higher margins to favorites. Returns (fair_home, fair_draw, fair_away).
+    """
+    pi = [1.0 / oh, 1.0 / od, 1.0 / oa]
+    s = sum(pi)
+    if s <= 1.0 + 1e-12:
+        return (pi[0] / s, pi[1] / s, pi[2] / s)
+
+    # Newton-Raphson for z (insider fraction)
+    z = (s - 1.0) / s
+    for _ in range(50):
+        terms = []
+        dterms = []
+        for pi_i in pi:
+            inner = z * z + 4.0 * (1.0 - z) * pi_i * pi_i / s
+            if inner < 0:
+                inner = 0.0
+            sqrt_inner = math.sqrt(inner)
+            p_i = (sqrt_inner - z) / (2.0 * (1.0 - z)) if (1.0 - z) > 1e-15 else pi_i / s
+            terms.append(p_i)
+            if sqrt_inner > 1e-15 and (1.0 - z) > 1e-15:
+                d_inner = 2.0 * z - 4.0 * pi_i * pi_i / s
+                d_sqrt = d_inner / (2.0 * sqrt_inner)
+                num = sqrt_inner - z
+                denom = 2.0 * (1.0 - z)
+                dp = (d_sqrt - 1.0) / denom + num / (2.0 * (1.0 - z) ** 2)
+                dterms.append(dp)
+            else:
+                dterms.append(0.0)
+        f_val = sum(terms) - 1.0
+        f_deriv = sum(dterms)
+        if abs(f_val) < 1e-10:
+            break
+        if abs(f_deriv) < 1e-15:
+            break
+        z -= f_val / f_deriv
+        z = max(0.0, min(z, 1.0 - 1e-10))
+
+    # Final probabilities
+    probs = []
+    for pi_i in pi:
+        inner = z * z + 4.0 * (1.0 - z) * pi_i * pi_i / s
+        if inner < 0:
+            inner = 0.0
+        sqrt_inner = math.sqrt(inner)
+        p_i = (sqrt_inner - z) / (2.0 * (1.0 - z)) if (1.0 - z) > 1e-15 else pi_i / s
+        probs.append(max(p_i, 1e-6))
+    total = sum(probs)
+    return (probs[0] / total, probs[1] / total, probs[2] / total)
+
+
 def load_hist_odds(conn, fixture_ids: list[int]) -> dict[int, dict]:
-    """Load historical odds for fixtures. Returns {fixture_id: {fair_home, fair_draw, fair_away}}."""
+    """Load historical odds for fixtures. Returns {fixture_id: {fair_home, fair_draw, fair_away}}.
+
+    Note: hist_odds typically contain a single snapshot per fixture.
+    These may approximate closing lines. The fair_delta feature used in stacking
+    is a spread indicator (fair_home - fair_away) which is less susceptible to
+    target leakage than individual fair probabilities.
+    """
     if not fixture_ids:
         return {}
     with conn.cursor() as cur:
@@ -109,14 +169,13 @@ def load_hist_odds(conn, fixture_ids: list[int]) -> dict[int, dict]:
             fid, oh, od, oa = row
             if oh and od and oa:
                 oh, od, oa = float(oh), float(od), float(oa)
-                # Remove overround
-                implied_sum = 1/oh + 1/od + 1/oa
-                if implied_sum > 0:
-                    result[fid] = {
-                        "fair_home": round((1/oh) / implied_sum, 6),
-                        "fair_draw": round((1/od) / implied_sum, 6),
-                        "fair_away": round((1/oa) / implied_sum, 6),
-                    }
+                # Remove overround using Shin's method (non-uniform margin)
+                fh, fd, fa = _remove_overround_shin_float(oh, od, oa)
+                result[fid] = {
+                    "fair_home": round(fh, 6),
+                    "fair_draw": round(fd, 6),
+                    "fair_away": round(fa, 6),
+                }
         return result
 
 
@@ -232,6 +291,8 @@ def generate_for_league(
     xg_for: dict[int, list[float]] = defaultdict(list)
     xg_against: dict[int, list[float]] = defaultdict(list)
     last_match_dt: dict[int, datetime] = {}
+    # H2H history: key = frozenset({team_a, team_b}), value = list of (home_goals, away_goals)
+    h2h_history: dict[frozenset, list[tuple[int, int]]] = defaultdict(list)
 
     dc_params = None
     dc_last_fit_idx = -999
@@ -335,6 +396,8 @@ def generate_for_league(
             a_xg_hist = xg_for.get(a, [])
             h_xg_l5 = float(np.mean(h_xg_hist[-5:])) if len(h_xg_hist) >= 3 else None
             a_xg_l5 = float(np.mean(a_xg_hist[-5:])) if len(a_xg_hist) >= 3 else None
+            h_xg_l10 = float(np.mean(h_xg_hist[-10:])) if len(h_xg_hist) >= 5 else h_xg_l5
+            a_xg_l10 = float(np.mean(a_xg_hist[-10:])) if len(a_xg_hist) >= 5 else a_xg_l5
 
             h_def = xg_against.get(h, [])
             a_def = xg_against.get(a, [])
@@ -374,6 +437,16 @@ def generate_for_league(
 
             # Odds
             odds = odds_map.get(fid, {})
+
+            # H2H features (from matches seen so far)
+            h2h_key = frozenset({h, a})
+            h2h_past = h2h_history[h2h_key][-10:]  # last 10 H2H meetings
+            if h2h_past:
+                h2h_draw_rate = round(sum(1 for hg, ag in h2h_past if hg == ag) / len(h2h_past), 4)
+                h2h_goals_avg = round(sum(hg + ag for hg, ag in h2h_past) / len(h2h_past), 4)
+            else:
+                h2h_draw_rate = 0.0
+                h2h_goals_avg = 0.0
 
             example = {
                 "fixture_id": fid,
@@ -417,10 +490,35 @@ def generate_for_league(
                 "fair_home": odds.get("fair_home"),
                 "fair_draw": odds.get("fair_draw"),
                 "fair_away": odds.get("fair_away"),
+                # fair_delta: single feature replacing 3 fair_* in stacking
+                "fair_delta": (
+                    round(odds["fair_home"] - odds["fair_away"], 6)
+                    if odds.get("fair_home") is not None and odds.get("fair_away") is not None
+                    else None
+                ),
                 "has_odds": bool(odds),
 
+                # xG momentum: (L5 - L10) / max(L10, 0.01) — positive = improving
+                "xg_momentum_home": (
+                    round((h_xg_l5 - h_xg_l10) / max(h_xg_l10, 0.01), 6)
+                    if h_xg_l5 is not None and h_xg_l10 is not None else 0.0
+                ),
+                "xg_momentum_away": (
+                    round((a_xg_l5 - a_xg_l10) / max(a_xg_l10, 0.01), 6)
+                    if a_xg_l5 is not None and a_xg_l10 is not None else 0.0
+                ),
+                # Rest advantage: (home_rest - away_rest) / 24
+                "rest_advantage": (
+                    round((h_rest - a_rest) / 24.0, 4)
+                    if h_rest is not None and a_rest is not None else 0.0
+                ),
+                # League position delta (not available in hist_fixtures, default 0)
+                "league_pos_delta": 0.0,
                 # Standings delta (not available in hist_fixtures, default 0)
                 "standings_delta": 0.0,
+                # H2H features
+                "h2h_draw_rate": h2h_draw_rate,
+                "h2h_goals_avg": h2h_goals_avg,
             }
             training_data.append(example)
 
@@ -447,6 +545,9 @@ def generate_for_league(
         # Last match datetime
         last_match_dt[h] = md_parsed
         last_match_dt[a] = md_parsed
+
+        # H2H history update
+        h2h_history[frozenset({h, a})].append((gh_i, ga_i))
 
     return training_data
 

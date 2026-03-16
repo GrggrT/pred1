@@ -123,7 +123,10 @@ PROB_SOURCE_MAP = {
 
 
 def _load_stacking_model_sync():
-    """Load stacking model from DB (sync via psycopg2)."""
+    """Load stacking model from DB (sync via psycopg2).
+
+    Supports both logistic and xgboost model types, with optional scaler.
+    """
     import os
     import psycopg2
     dsn = os.environ.get("DATABASE_URL", "").replace("postgresql+asyncpg://", "postgresql://")
@@ -140,20 +143,62 @@ def _load_stacking_model_sync():
         conn.close()
         if row and row[0]:
             meta = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-            return {
-                "coefficients": np.array(meta["coefficients"], dtype=np.float64),
-                "intercept": np.array(meta["intercept"], dtype=np.float64),
+            model_type = meta.get("model_type", "logistic")
+            result = {
                 "feature_names": meta["feature_names"],
+                "model_type": model_type,
+                "scaler_mean": np.array(meta["scaler_mean"], dtype=np.float64) if meta.get("scaler_mean") else None,
+                "scaler_scale": np.array(meta["scaler_scale"], dtype=np.float64) if meta.get("scaler_scale") else None,
             }
+            if model_type == "xgboost":
+                result["xgb_model_json"] = meta["xgb_model_json"]
+            else:
+                result["coefficients"] = np.array(meta["coefficients"], dtype=np.float64)
+                result["intercept"] = np.array(meta["intercept"], dtype=np.float64)
+            return result
     except Exception as e:
         log.warning("Failed to load stacking model: %s", e)
     return None
 
 
+def _apply_scaler(x: np.ndarray, model: dict) -> np.ndarray:
+    """Apply StandardScaler if present in model."""
+    if model.get("scaler_mean") is not None and model.get("scaler_scale") is not None:
+        return (x - model["scaler_mean"]) / np.maximum(model["scaler_scale"], 1e-10)
+    return x
+
+
+def _init_xgb_booster(model: dict):
+    """Lazily initialize XGBoost booster from model JSON (cached on model dict)."""
+    if "_booster" not in model:
+        import tempfile
+        import os
+        import xgboost as xgb
+        fd, path = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(model["xgb_model_json"])
+            booster = xgb.Booster()
+            booster.load_model(path)
+        finally:
+            os.unlink(path)
+        model["_booster"] = booster
+    return model["_booster"]
+
+
 def _apply_stacking(row: dict, model: dict) -> tuple[float, float, float] | None:
-    """Apply stacking model to a training data row."""
+    """Apply stacking model to a training data row. Supports logistic and xgboost."""
     x = np.array([row.get(name, 0.0) or 0.0 for name in model["feature_names"]], dtype=np.float64)
-    logits = model["coefficients"] @ x + model["intercept"]
+    x = _apply_scaler(x, model)
+
+    if model.get("model_type") == "xgboost":
+        import xgboost as xgb
+        booster = _init_xgb_booster(model)
+        dmatrix = xgb.DMatrix(x.reshape(1, -1), feature_names=model["feature_names"])
+        logits = booster.predict(dmatrix, output_margin=True)[0]
+    else:
+        logits = model["coefficients"] @ x + model["intercept"]
+
     logits -= logits.max()
     exp_logits = np.exp(logits)
     probs = exp_logits / exp_logits.sum()
@@ -299,7 +344,7 @@ async def main(args):
     log.info("Split: train=%d val=%d", len(probs_train), len(probs_val))
 
     # Fit
-    calibrator = DirichletCalibrator(reg_lambda=args.reg_lambda)
+    calibrator = DirichletCalibrator(reg_lambda=args.reg_lambda, reg_mu=args.reg_mu)
     calibrator.fit(probs_train, labels_train)
 
     # Evaluate before/after on validation
@@ -373,7 +418,10 @@ def parse_args():
     )
     parser.add_argument("--league-id", type=int, default=None)
     parser.add_argument("--min-samples", type=int, default=200)
-    parser.add_argument("--reg-lambda", type=float, default=0.01)
+    parser.add_argument("--reg-lambda", type=float, default=0.01,
+                        help="L2 regularization for off-diagonal W elements (default: 0.01)")
+    parser.add_argument("--reg-mu", type=float, default=None,
+                        help="L2 regularization for diagonal W elements towards 1.0 (default: None)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true", help="Save even if metrics worsen")
     return parser.parse_args()
