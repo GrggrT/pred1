@@ -881,7 +881,7 @@ async def _run_job(job_name: str, job_fn, triggered_by: str | None = None, meta:
         logger.warning("job_skip_already_running job=%s", job_name)
         return
     async with lock:
-        key = _advisory_key("global")
+        key = _advisory_key(f"job:{job_name}")
         async with engine.connect() as lock_conn:
             if not await _try_advisory_lock(lock_conn, key):
                 logger.warning("job_skip_global_lock job=%s", job_name)
@@ -992,7 +992,7 @@ async def _run_pipeline(triggered_by: str | None = None, meta: Optional[dict] = 
         logger.warning("pipeline_skip_already_running")
         return
     async with PIPELINE_LOCK:
-        key = _advisory_key("global")
+        key = _advisory_key("job:full_pipeline")
         async with engine.connect() as lock_conn:
             if not await _try_advisory_lock(lock_conn, key):
                 logger.warning("pipeline_skip_global_lock")
@@ -4522,6 +4522,57 @@ async def public_stats(
     }
 
 
+@app.get("/api/public/v1/market-stats")
+async def public_market_stats(
+    days: int = Query(90, ge=1, le=365),
+    _rate: None = Depends(_check_public_rate),
+    session: AsyncSession = Depends(get_session),
+):
+    """Per-market performance metrics (public, no admin token)."""
+    cutoff = max(utcnow() - timedelta(days=days), STATS_EPOCH)
+    res = await session.execute(
+        text("""
+            WITH combined AS (
+              SELECT '1X2'::text AS market, p.status, p.profit, p.settled_at
+              FROM predictions p
+              WHERE p.selection_code != 'SKIP'
+              UNION ALL
+              SELECT pt.market::text, COALESCE(pt.status,'PENDING'), pt.profit, pt.settled_at
+              FROM predictions_totals pt
+            )
+            SELECT market,
+              COUNT(*) FILTER (WHERE status IN ('WIN','LOSS')) AS settled,
+              COUNT(*) FILTER (WHERE status='WIN') AS wins,
+              COUNT(*) FILTER (WHERE status='LOSS') AS losses,
+              COALESCE(SUM(profit) FILTER (WHERE status IN ('WIN','LOSS')), 0) AS profit
+            FROM combined
+            WHERE settled_at >= :cutoff
+              AND status IN ('WIN','LOSS')
+            GROUP BY market
+            ORDER BY market
+        """).bindparams(bindparam("cutoff", type_=SADateTime(timezone=True))),
+        {"cutoff": cutoff},
+    )
+    markets = {}
+    for row in res.fetchall():
+        mkt = str(row.market or "")
+        settled = int(row.settled or 0)
+        wins = int(row.wins or 0)
+        losses = int(row.losses or 0)
+        profit = float(row.profit or 0)
+        if settled == 0:
+            continue
+        markets[mkt] = {
+            "settled": settled,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round((wins / settled) * 100, 1),
+            "roi": round((profit / settled) * 100, 1),
+            "total_profit": round(profit, 2),
+        }
+    return markets
+
+
 @app.get("/api/public/v1/matches")
 async def public_matches(
     league_id: Optional[int] = None,
@@ -4584,7 +4635,8 @@ async def public_matches(
                      th.logo_url AS home_logo_url, ta.logo_url AS away_logo_url,
                      f.league_id, l.name AS league, l.logo_url AS league_logo_url,
                      f.status AS fixture_status, f.home_goals, f.away_goals,
-                     p.selection_code AS pick, p.initial_odd, p.confidence
+                     p.selection_code AS pick, p.initial_odd, p.confidence,
+                     p.feature_flags
               FROM predictions p
               JOIN fixtures f ON f.id = p.fixture_id
               JOIN teams th ON th.id = f.home_team_id
@@ -4603,7 +4655,8 @@ async def public_matches(
                      th.logo_url AS home_logo_url, ta.logo_url AS away_logo_url,
                      f.league_id, l.name AS league, l.logo_url AS league_logo_url,
                      f.status AS fixture_status, f.home_goals, f.away_goals,
-                     pt.selection AS pick, pt.initial_odd, pt.confidence
+                     pt.selection AS pick, pt.initial_odd, pt.confidence,
+                     NULL::jsonb AS feature_flags
               FROM predictions_totals pt
               JOIN fixtures f ON f.id = pt.fixture_id
               JOIN teams th ON th.id = f.home_team_id
@@ -4641,7 +4694,9 @@ async def public_matches(
                 ev = round(float(Decimal(str(r.confidence)) * Decimal(str(r.initial_odd)) - 1), 4)
             except Exception:
                 ev = None
-        out.append({
+        ff = (r.feature_flags or {}) if hasattr(r, 'feature_flags') else {}
+        pick_val = r.pick or ""
+        item = {
             "fixture_id": int(r.fixture_id),
             "kickoff": r.kickoff.isoformat() if r.kickoff else None,
             "home": r.home,
@@ -4658,7 +4713,21 @@ async def public_matches(
             "odd": float(r.initial_odd) if r.initial_odd else None,
             "confidence": round(float(r.confidence), 4) if r.confidence is not None else None,
             "ev": ev,
-        })
+            "prob_home": ff.get("p_home"),
+            "prob_draw": ff.get("p_draw"),
+            "prob_away": ff.get("p_away"),
+            "prob_source": ff.get("prob_source"),
+        }
+        # Fair odd for the selected pick
+        if pick_val in ("H", "HOME_WIN", "1", "DC_1X"):
+            item["fair_odd"] = ff.get("fair_home")
+        elif pick_val in ("D", "DRAW", "X"):
+            item["fair_odd"] = ff.get("fair_draw")
+        elif pick_val in ("A", "AWAY_WIN", "2", "DC_X2"):
+            item["fair_odd"] = ff.get("fair_away")
+        else:
+            item["fair_odd"] = None
+        out.append(item)
     return out
 
 
@@ -4917,6 +4986,48 @@ async def public_standings(
         }
         for r in res.fetchall()
     ]
+
+
+@app.get("/api/public/v1/news")
+async def public_news(
+    limit: int = Query(10, ge=1, le=50),
+    category: Optional[str] = None,
+    _rate: None = Depends(_check_public_rate),
+    *,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    """Public news feed — recent published articles."""
+    where_cat = "AND category = :category" if category else ""
+    res = await session.execute(
+        text(f"""
+            SELECT id, title, slug, summary, body, category,
+                   league_id, sources, published_at
+            FROM news_articles
+            WHERE status = 'published'
+              {where_cat}
+            ORDER BY published_at DESC
+            LIMIT :limit
+        """),
+        {"limit": limit, "category": category},
+    )
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "title": r.title,
+                "slug": r.slug,
+                "summary": r.summary,
+                "body": r.body,
+                "category": r.category,
+                "league_id": r.league_id,
+                "sources": r.sources,
+                "published_at": r.published_at.isoformat() if r.published_at else None,
+            }
+            for r in res.fetchall()
+        ]
+    }
 
 
 @app.get("/api/v1/league_baselines")
