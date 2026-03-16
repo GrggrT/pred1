@@ -139,8 +139,10 @@ async def main() -> None:
     await init_http_clients()
     log.info("ai_office_infra_ready")
 
-    # Setup scheduler
-    scheduler = AsyncIOScheduler()
+    # Setup scheduler — generous misfire_grace_time for e2-micro
+    scheduler = AsyncIOScheduler(
+        job_defaults={"misfire_grace_time": 300, "coalesce": True},
+    )
 
     cron_expr = settings.ai_office_monitor_cron
     try:

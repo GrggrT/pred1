@@ -71,6 +71,7 @@ async def run(session: AsyncSession):
 
     # ── Import here to avoid circular imports ─────────────────────
     from app.services.publishing import publish_fixture
+    from app.core.db import SessionLocal
 
     window_hours = int(settings.auto_publish_window_hours or 48)
     cutoff = now + timedelta(hours=window_hours)
@@ -194,6 +195,8 @@ async def run(session: AsyncSession):
             }
 
     # ── Step 4: publish ONE fixture ───────────────────────────────
+    # Use a FRESH session for publish_fixture because it runs for 2+ min
+    # (AI generation + Telegram sends) and the original session may timeout.
     next_fid = fixture_ids[0]
     log.info(
         "auto_publish: publishing fixture=%s (1 of %d, interval=%.0fs)",
@@ -201,7 +204,8 @@ async def run(session: AsyncSession):
     )
 
     try:
-        pub_result = await publish_fixture(session, next_fid)
+        async with SessionLocal() as pub_session:
+            pub_result = await publish_fixture(pub_session, next_fid)
         results_list = pub_result.get("results", [])
         any_ok = any(
             r.get("status") in ("ok", "published", "sent")
@@ -245,10 +249,6 @@ async def run(session: AsyncSession):
             }
     except Exception:
         log.exception("auto_publish: fixture=%s failed", next_fid)
-        try:
-            await session.rollback()
-        except Exception:
-            pass
         return {
             "published": 0,
             "skipped": 0,

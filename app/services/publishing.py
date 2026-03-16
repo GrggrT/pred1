@@ -4475,23 +4475,41 @@ async def publish_fixture(
                 )
                 results.append({"market": market["market"], "lang": lang, "status": "ok"})
             except Exception as exc:
-                await _record_publication(
-                    session,
-                    fixture_id,
-                    market["market"],
-                    lang,
-                    channel_id,
-                    "send_failed",
-                    experimental=experimental,
-                    content_hash=content_hash,
-                    idempotency_key=idempotency_key,
-                    payload={"reason": "send_failed"},
-                    error=str(exc),
-                )
-                results.append({"market": market["market"], "lang": lang, "status": "failed", "error": str(exc)})
                 log.exception("publish_failed fixture=%s market=%s lang=%s", fixture_id, market["market"], lang)
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
+                try:
+                    await _record_publication(
+                        session,
+                        fixture_id,
+                        market["market"],
+                        lang,
+                        channel_id,
+                        "send_failed",
+                        experimental=experimental,
+                        content_hash=content_hash,
+                        idempotency_key=idempotency_key,
+                        payload={"reason": "send_failed"},
+                        error=str(exc),
+                    )
+                except Exception:
+                    log.exception("record_failed_publication_error fixture=%s", fixture_id)
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+                results.append({"market": market["market"], "lang": lang, "status": "failed", "error": str(exc)})
 
-    await session.commit()
+    try:
+        await session.commit()
+    except Exception:
+        log.exception("publish_final_commit_failed fixture=%s", fixture_id)
+        try:
+            await session.rollback()
+        except Exception:
+            pass
     return {
         "fixture_id": fixture_id,
         "mode": mode,
