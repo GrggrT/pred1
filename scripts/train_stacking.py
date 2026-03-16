@@ -200,6 +200,10 @@ def load_training_data_from_file(filepath: str, league_id: int | None, min_sampl
         payload = json.load(f)
 
     data = payload.get("data", [])
+
+    # Sort by kickoff globally before splitting (critical for correct chronological split!)
+    data.sort(key=lambda r: r.get("kickoff", ""))
+
     if league_id is not None:
         data = [d for d in data if d.get("league_id") == league_id]
 
