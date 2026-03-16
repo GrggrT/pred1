@@ -8,6 +8,7 @@ Runs:
 from __future__ import annotations
 
 import asyncio
+import logging
 import signal
 import sys
 
@@ -18,6 +19,9 @@ from app.core.config import settings
 from app.core.db import SessionLocal, init_db
 from app.core.http import init_http_clients, close_http_clients
 from app.core.logger import get_logger
+
+# Suppress noisy httpx INFO logs (getUpdates polling every 10s)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 log = get_logger("ai_office.runner")
 

@@ -80,39 +80,25 @@ async def run(session: AsyncSession) -> dict[str, Any]:
     report_text = raw_report.strip()
     log.info("researcher_report_generated len=%d", len(report_text))
 
-    # Save to ai_office_reports
+    # Send to Telegram
+    header = f"📚 <b>Weekly Research — {week_label}</b>\n\n"
+    # Truncate for Telegram (4096 char limit)
+    tg_text = report_text
+    max_len = 4096 - len(header) - 50
+    if len(tg_text) > max_len:
+        tg_text = tg_text[:max_len] + "\n\n[...обрезано]"
+
+    sent = await send_to_owner(header + tg_text)
+
+    # Save report once (after telegram attempt)
     await save_report(
         session,
         agent="researcher",
         report_type="weekly_research",
         report_text=report_text,
         metadata={"week": week_label, "keywords_count": len(RESEARCH_KEYWORDS)},
-        telegram_sent=False,
+        telegram_sent=sent,
     )
-
-    # Send to Telegram
-    header = f"📚 <b>Weekly Research — {week_label}</b>\n\n"
-    # Truncate for Telegram (4096 char limit)
-    max_len = 4096 - len(header) - 50
-    if len(report_text) > max_len:
-        report_text = report_text[:max_len] + "\n\n[...обрезано]"
-
-    sent = await send_to_owner(header + report_text)
-
-    if sent:
-        # Update telegram_sent flag
-        await save_report(
-            session,
-            agent="researcher",
-            report_type="weekly_research",
-            report_text=report_text,
-            metadata={
-                "week": week_label,
-                "keywords_count": len(RESEARCH_KEYWORDS),
-                "telegram_sent": True,
-            },
-            telegram_sent=True,
-        )
 
     log.info("researcher_done week=%s sent=%s", week_label, sent)
     return {"status": "sent" if sent else "done", "week": week_label}

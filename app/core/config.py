@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     card_gen_v2: bool = Field(default=False, alias="CARD_GEN_V2")
     publish_deepl_fallback: bool = Field(default=False, alias="PUBLISH_DEEPL_FALLBACK")
     publish_metrics_window_hours: int = Field(default=24, alias="PUBLISH_METRICS_WINDOW_HOURS")
+    publish_quiet_before_utc_hour: int = Field(default=6, alias="PUBLISH_QUIET_BEFORE_UTC_HOUR")
     publish_html_fallback_alert_pct: Decimal = Field(default=Decimal("15"), alias="PUBLISH_HTML_FALLBACK_ALERT_PCT")
 
     groq_api_key: str = Field("", alias="GROQ_API_KEY")
