@@ -239,6 +239,142 @@ async def cmd_override(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("❌ Ошибка при переопределении")
 
 
+async def cmd_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /news command — show recent news or run news agent."""
+    if not _is_owner(update):
+        return
+
+    log.info("cmd_news from user=%s", update.effective_user.id)
+
+    args = context.args or []
+
+    # /news fetch — run the full news pipeline
+    if args and args[0].lower() == "fetch":
+        try:
+            from .agents.news import run as news_run
+
+            await update.message.reply_text("📰 Запускаю сбор новостей...")
+
+            async with SessionLocal() as session:
+                result = await news_run(session)
+
+            status = result.get("status", "done")
+            if status == "skipped":
+                reason = html.escape(result.get("reason", "no data"))
+                await update.message.reply_text(f"📰 News: {reason}")
+            elif status == "done" and result.get("published", 0) == 0:
+                await update.message.reply_text(
+                    f"📰 Получено {result.get('fetched', 0)} элементов, "
+                    f"но ничего не опубликовано (отфильтровано)"
+                )
+            # If published > 0, agent already sent digest via send_to_owner
+        except Exception:
+            log.exception("cmd_news_fetch_error")
+            await update.message.reply_text("❌ Ошибка при сборе новостей")
+        return
+
+    # /news — show recent articles
+    try:
+        from .queries import fetch_recent_news
+        from .agents.news import format_news_list
+
+        async with SessionLocal() as session:
+            articles = await fetch_recent_news(session, limit=5)
+
+        text = format_news_list(articles)
+        await update.message.reply_text(text, parse_mode="HTML")
+    except Exception:
+        log.exception("cmd_news_error")
+        await update.message.reply_text("❌ Ошибка при загрузке новостей")
+
+
+async def cmd_research(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /research command — run researcher agent on-demand."""
+    if not _is_owner(update):
+        return
+
+    log.info("cmd_research from user=%s", update.effective_user.id)
+
+    try:
+        await update.message.reply_text("📚 Запускаю research...")
+
+        from .agents.researcher import run as researcher_run
+
+        async with SessionLocal() as session:
+            result = await researcher_run(session)
+
+        status = result.get("status", "done")
+        if status == "skipped":
+            reason = html.escape(result.get("reason", "no data"))
+            await update.message.reply_text(f"📚 Research: {reason}")
+        elif status == "error":
+            reason = html.escape(result.get("reason", "unknown"))
+            await update.message.reply_text(f"📚 Research: ошибка — {reason}")
+        # If status == "sent", agent already sent the report via send_to_owner
+    except Exception:
+        log.exception("cmd_research_error")
+        await update.message.reply_text("❌ Ошибка при запуске ресёрчера")
+
+
+async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /ask command — free-form question about data.
+
+    Usage: /ask <question>
+    Example: /ask Какой ROI по Bundesliga за последний месяц?
+    """
+    if not _is_owner(update):
+        return
+
+    log.info("cmd_ask from user=%s", update.effective_user.id)
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "Формат: /ask &lt;вопрос&gt;\n"
+            "Пример: /ask Какой ROI по Bundesliga?",
+            parse_mode="HTML",
+        )
+        return
+
+    question = " ".join(args)
+
+    try:
+        from .queries import fetch_ask_context
+        from .config import ASK_SYSTEM_PROMPT
+
+        async with SessionLocal() as session:
+            db_context = await fetch_ask_context(session)
+
+        prompt = f"Вопрос пользователя: {question}\n\nКонтекст из базы данных:\n{db_context}"
+
+        if settings.groq_enabled and settings.groq_api_key:
+            from app.data.providers.groq import generate_text
+
+            async with SessionLocal() as session2:
+                answer = await generate_text(
+                    session2,
+                    prompt,
+                    system_prompt=ASK_SYSTEM_PROMPT,
+                    temperature=0.3,
+                    max_tokens=512,
+                    use_cache=False,
+                )
+            if answer:
+                await update.message.reply_text(
+                    f"💬 {html.escape(answer)}", parse_mode="HTML"
+                )
+                return
+
+        # Fallback: just show raw context
+        await update.message.reply_text(
+            f"📊 <b>Данные:</b>\n\n<pre>{html.escape(db_context[:3500])}</pre>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        log.exception("cmd_ask_error")
+        await update.message.reply_text("❌ Ошибка при обработке вопроса")
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command — welcome message."""
     if not _is_owner(update):
@@ -270,6 +406,9 @@ def build_bot() -> Application:
     app.add_handler(CommandHandler("picks", cmd_picks))
     app.add_handler(CommandHandler("scout", cmd_scout))
     app.add_handler(CommandHandler("override", cmd_override))
+    app.add_handler(CommandHandler("news", cmd_news))
+    app.add_handler(CommandHandler("research", cmd_research))
+    app.add_handler(CommandHandler("ask", cmd_ask))
     app.add_handler(CommandHandler("help", cmd_help))
 
     log.info("telegram_bot_built handlers=%d", len(app.handlers[0]))

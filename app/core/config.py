@@ -81,10 +81,25 @@ class Settings(BaseSettings):
     ai_office_analyst_cron: str = Field("0 8 * * *", alias="AI_OFFICE_ANALYST_CRON")
     ai_office_content_picks_cron: str = Field("0 12 * * *", alias="AI_OFFICE_CONTENT_PICKS_CRON")
     ai_office_scout_cron: str = Field("0 10 * * *", alias="AI_OFFICE_SCOUT_CRON")
+    ai_office_news_cron: str = Field("0 */4 * * *", alias="AI_OFFICE_NEWS_CRON")
+    ai_office_researcher_cron: str = Field("0 10 * * 0", alias="AI_OFFICE_RESEARCHER_CRON")
+    ai_office_news_feeds: str = Field(
+        "https://feeds.bbci.co.uk/sport/football/rss.xml,"
+        "https://www.theguardian.com/football/rss,"
+        "https://www.espn.com/espn/rss/soccer/news",
+        alias="AI_OFFICE_NEWS_FEEDS",
+    )
 
     league_ids_raw: str = Field("39,78,140,135", alias="LEAGUE_IDS")
     season: int = Field(default_factory=_default_season, alias="SEASON")
     bookmaker_id: int = Field(1, alias="BOOKMAKER_ID")
+
+    # Pinnacle odds sync
+    sync_pinnacle_odds: bool = Field(default=False, alias="SYNC_PINNACLE_ODDS")
+    pinnacle_bookmaker_id: int = Field(default=4, alias="PINNACLE_BOOKMAKER_ID")
+
+    # Per-league prediction controls
+    disabled_prediction_leagues_raw: str = Field(default="", alias="DISABLED_PREDICTION_LEAGUES")
 
     min_odd: Decimal = Field(Decimal("1.50"), alias="MIN_ODD")
     max_odd: Decimal = Field(Decimal("3.20"), alias="MAX_ODD")
@@ -142,6 +157,14 @@ class Settings(BaseSettings):
     @property
     def league_ids(self) -> List[int]:
         return [int(x.strip()) for x in self.league_ids_raw.split(",") if x.strip()]
+
+    @property
+    def disabled_prediction_leagues(self) -> set[int]:
+        """Set of league IDs where predictions are disabled. Empty = all enabled."""
+        raw = (self.disabled_prediction_leagues_raw or "").strip()
+        if not raw:
+            return set()
+        return {int(x.strip()) for x in raw.split(",") if x.strip()}
 
     @property
     def telegram_channels(self) -> dict[str, int]:

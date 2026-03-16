@@ -1,7 +1,7 @@
 """AI Office runner — main entry point for Docker service.
 
 Runs:
-1. APScheduler with monitor, analyst, scout, and content agents on cron schedules
+1. APScheduler with monitor, analyst, scout, content, and news agents on cron schedules
 2. Telegram bot polling loop
 """
 
@@ -72,6 +72,49 @@ async def _run_content_picks() -> None:
             log.info("scheduled_content_picks_done result=%s", result)
     except Exception:
         log.exception("scheduled_content_picks_error")
+
+
+async def _run_news() -> None:
+    """Wrapper to run news agent with its own DB session."""
+    from app.ai_office.agents.news import run as news_run
+
+    log.info("scheduled_news_start")
+    try:
+        async with SessionLocal() as session:
+            result = await news_run(session)
+            log.info("scheduled_news_done result=%s", result)
+    except Exception:
+        log.exception("scheduled_news_error")
+
+
+async def _run_researcher() -> None:
+    """Wrapper to run researcher agent with its own DB session."""
+    from app.ai_office.agents.researcher import run as researcher_run
+
+    log.info("scheduled_researcher_start")
+    try:
+        async with SessionLocal() as session:
+            result = await researcher_run(session)
+            log.info("scheduled_researcher_done result=%s", result)
+    except Exception:
+        log.exception("scheduled_researcher_error")
+
+
+async def _run_cleanup() -> None:
+    """Wrapper to run TTL cleanup for old reports/news."""
+    from app.ai_office.queries import (
+        cleanup_old_reports, cleanup_old_scout_reports, cleanup_old_news,
+    )
+
+    log.info("scheduled_cleanup_start")
+    try:
+        async with SessionLocal() as session:
+            r1 = await cleanup_old_reports(session, days=90)
+            r2 = await cleanup_old_scout_reports(session, days=90)
+            r3 = await cleanup_old_news(session, days=90)
+            log.info("scheduled_cleanup_done reports=%d scout=%d news=%d", r1, r2, r3)
+    except Exception:
+        log.exception("scheduled_cleanup_error")
 
 
 async def main() -> None:
@@ -157,6 +200,53 @@ async def main() -> None:
         log.info("scheduler_job_added job=content_picks cron=%s", content_cron)
     except Exception:
         log.exception("scheduler_cron_parse_failed cron=%s", content_cron)
+
+    # News agent — RSS feed parsing and article generation
+    news_cron = settings.ai_office_news_cron
+    try:
+        trigger = CronTrigger.from_crontab(news_cron)
+        scheduler.add_job(
+            _run_news,
+            trigger=trigger,
+            id="ai_office_news",
+            max_instances=1,
+            coalesce=True,
+            name="AI Office News",
+        )
+        log.info("scheduler_job_added job=news cron=%s", news_cron)
+    except Exception:
+        log.exception("scheduler_cron_parse_failed cron=%s", news_cron)
+
+    # Researcher agent — weekly research report
+    researcher_cron = settings.ai_office_researcher_cron
+    try:
+        trigger = CronTrigger.from_crontab(researcher_cron)
+        scheduler.add_job(
+            _run_researcher,
+            trigger=trigger,
+            id="ai_office_researcher",
+            max_instances=1,
+            coalesce=True,
+            name="AI Office Researcher",
+        )
+        log.info("scheduler_job_added job=researcher cron=%s", researcher_cron)
+    except Exception:
+        log.exception("scheduler_cron_parse_failed cron=%s", researcher_cron)
+
+    # TTL cleanup — daily at 03:00 UTC
+    try:
+        trigger = CronTrigger.from_crontab("0 3 * * *")
+        scheduler.add_job(
+            _run_cleanup,
+            trigger=trigger,
+            id="ai_office_cleanup",
+            max_instances=1,
+            coalesce=True,
+            name="AI Office Cleanup",
+        )
+        log.info("scheduler_job_added job=cleanup cron=0 3 * * *")
+    except Exception:
+        log.exception("scheduler_cron_parse_failed cron=0 3 * * *")
 
     scheduler.start()
     log.info("scheduler_started jobs=%d", len(scheduler.get_jobs()))

@@ -1,4 +1,4 @@
-"""SQL queries for AI Office agents — health checks, settled, upcoming picks."""
+"""SQL queries for AI Office agents — health checks, settled, upcoming picks, news."""
 
 from __future__ import annotations
 
@@ -260,6 +260,161 @@ async def fetch_settled_24h(session: AsyncSession) -> list[dict[str, Any]]:
     return [dict(r) for r in result.mappings().all()]
 
 
+async def fetch_ask_context(session: AsyncSession) -> str:
+    """Build a summary context string for the /ask command.
+
+    Aggregates key metrics from the database to provide Groq with
+    enough context to answer free-form questions.
+    """
+    parts = []
+
+    # 1. Overall prediction stats (last 30 days)
+    try:
+        r = await session.execute(text("""
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE p.status = 'WON') as won,
+                COUNT(*) FILTER (WHERE p.status = 'LOSS') as lost,
+                ROUND(COALESCE(SUM(p.profit), 0)::numeric, 2) as profit,
+                ROUND(CASE WHEN COUNT(*) > 0
+                    THEN (SUM(p.profit) / COUNT(*) * 100)::numeric
+                    ELSE 0 END, 1) as roi
+            FROM predictions p
+            JOIN fixtures f ON f.id = p.fixture_id
+            WHERE p.status IN ('WON', 'LOSS')
+              AND f.kickoff > now() - interval '30 days'
+        """))
+        row = r.mappings().first()
+        if row:
+            parts.append(
+                f"1X2 за 30 дней: {row['total']} ставок, "
+                f"{row['won']} W / {row['lost']} L, "
+                f"profit={row['profit']}u, ROI={row['roi']}%"
+            )
+    except Exception:
+        pass
+
+    # 2. Per-league breakdown
+    try:
+        r = await session.execute(text("""
+            SELECT l.name as league,
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE p.status = 'WON') as won,
+                ROUND(COALESCE(SUM(p.profit), 0)::numeric, 2) as profit
+            FROM predictions p
+            JOIN fixtures f ON f.id = p.fixture_id
+            JOIN leagues l ON l.id = f.league_id
+            WHERE p.status IN ('WON', 'LOSS')
+              AND f.kickoff > now() - interval '30 days'
+            GROUP BY l.name
+            ORDER BY total DESC
+            LIMIT 6
+        """))
+        rows = r.mappings().all()
+        if rows:
+            lines = ["По лигам (30 дней):"]
+            for rr in rows:
+                lines.append(f"  {rr['league']}: {rr['total']} ставок, {rr['won']}W, profit={rr['profit']}u")
+            parts.append("\n".join(lines))
+    except Exception:
+        pass
+
+    # 3. Recent settled (last 48h)
+    try:
+        r = await session.execute(text("""
+            SELECT ht.name || ' — ' || att.name as match,
+                   p.selection_code, p.initial_odd, p.status, p.profit
+            FROM predictions p
+            JOIN fixtures f ON f.id = p.fixture_id
+            JOIN teams ht ON ht.id = f.home_team_id
+            JOIN teams att ON att.id = f.away_team_id
+            WHERE p.status IN ('WON', 'LOSS')
+              AND f.kickoff > now() - interval '48 hours'
+            ORDER BY f.kickoff DESC
+            LIMIT 10
+        """))
+        rows = r.mappings().all()
+        if rows:
+            lines = ["Последние settled (48ч):"]
+            for rr in rows:
+                emoji = "✅" if rr['status'] == 'WON' else "❌"
+                lines.append(f"  {emoji} {rr['match']} | {rr['selection_code']} @ {rr['initial_odd']} | {rr['profit']}u")
+            parts.append("\n".join(lines))
+    except Exception:
+        pass
+
+    # 4. Upcoming predictions count
+    try:
+        r = await session.execute(text("""
+            SELECT COUNT(*) as cnt
+            FROM predictions p
+            JOIN fixtures f ON f.id = p.fixture_id
+            WHERE f.status = 'NS'
+              AND f.kickoff BETWEEN now() AND now() + interval '48 hours'
+              AND p.selection_code != 'SKIP'
+        """))
+        row = r.mappings().first()
+        if row:
+            parts.append(f"Upcoming predictions (48ч): {row['cnt']}")
+    except Exception:
+        pass
+
+    # 5. Last job runs
+    try:
+        r = await session.execute(text("""
+            SELECT DISTINCT ON (job_name) job_name, status, started_at,
+                   ROUND(EXTRACT(EPOCH FROM now() - started_at)/3600) as hours_ago
+            FROM job_runs
+            ORDER BY job_name, started_at DESC
+            LIMIT 10
+        """))
+        rows = r.mappings().all()
+        if rows:
+            lines = ["Последние джобы:"]
+            for rr in rows:
+                lines.append(f"  {rr['job_name']}: {rr['status']} ({rr['hours_ago']}ч назад)")
+            parts.append("\n".join(lines))
+    except Exception:
+        pass
+
+    return "\n\n".join(parts) if parts else "Нет данных в БД."
+
+
+async def cleanup_old_reports(session: AsyncSession, days: int = 90) -> int:
+    """Delete reports older than N days. Returns count deleted."""
+    result = await session.execute(text("""
+        DELETE FROM ai_office_reports
+        WHERE created_at < now() - make_interval(days => :days)
+    """), {"days": days})
+    await session.commit()
+    return result.rowcount or 0
+
+
+async def cleanup_old_scout_reports(session: AsyncSession, days: int = 90) -> int:
+    """Delete scout reports older than N days. Returns count deleted."""
+    result = await session.execute(text("""
+        DELETE FROM scout_reports
+        WHERE created_at < now() - make_interval(days => :days)
+    """), {"days": days})
+    await session.commit()
+    return result.rowcount or 0
+
+
+async def cleanup_old_news(session: AsyncSession, days: int = 90) -> int:
+    """Delete news articles + sources older than N days. Returns count deleted."""
+    # Delete articles first (references sources)
+    r1 = await session.execute(text("""
+        DELETE FROM news_articles
+        WHERE created_at < now() - make_interval(days => :days)
+    """), {"days": days})
+    r2 = await session.execute(text("""
+        DELETE FROM news_sources
+        WHERE fetched_at < now() - make_interval(days => :days)
+    """), {"days": days})
+    await session.commit()
+    return (r1.rowcount or 0) + (r2.rowcount or 0)
+
+
 # ---------------------------------------------------------------------------
 # Scout queries
 # ---------------------------------------------------------------------------
@@ -284,6 +439,147 @@ async def fetch_scout_matches(session: AsyncSession) -> list[dict[str, Any]]:
           AND p.selection_code != 'SKIP'
         ORDER BY f.kickoff
     """))
+    return [dict(r) for r in result.mappings().all()]
+
+
+# ---------------------------------------------------------------------------
+# News queries
+# ---------------------------------------------------------------------------
+
+def _make_slug(title: str) -> str:
+    """Generate a URL-friendly slug from a title."""
+    import re
+    import time
+
+    slug = re.sub(r"[^\w\s-]", "", title.lower())
+    slug = re.sub(r"[\s_]+", "-", slug).strip("-")
+    if not slug or len(slug) < 3:
+        slug = f"news-{int(time.time())}"
+    return slug[:280]
+
+
+async def save_news_source(
+    session: AsyncSession,
+    url: str,
+    source_name: str,
+    title: str,
+    raw_text: str | None = None,
+) -> int | None:
+    """Insert RSS item into news_sources. Skip if URL exists. Return id or None."""
+    result = await session.execute(
+        text("""
+            INSERT INTO news_sources (url, source_name, title, raw_text)
+            VALUES (:url, :source_name, :title, :raw_text)
+            ON CONFLICT (url) DO NOTHING
+            RETURNING id
+        """),
+        {"url": url, "source_name": source_name, "title": title, "raw_text": raw_text},
+    )
+    await session.commit()
+    row = result.fetchone()
+    return row[0] if row else None
+
+
+async def fetch_unprocessed_sources(
+    session: AsyncSession, limit: int = 30
+) -> list[dict[str, Any]]:
+    """Fetch unprocessed news_sources (not yet linked to article)."""
+    result = await session.execute(
+        text("""
+            SELECT id, url, source_name, title, raw_text
+            FROM news_sources
+            WHERE processed = false
+              AND fetched_at > now() - interval '48 hours'
+            ORDER BY fetched_at DESC
+            LIMIT :limit
+        """),
+        {"limit": limit},
+    )
+    return [dict(r) for r in result.mappings().all()]
+
+
+async def mark_sources_processed(
+    session: AsyncSession,
+    source_ids: list[int],
+    article_id: int | None = None,
+) -> None:
+    """Mark news_sources as processed, optionally link to article."""
+    if not source_ids:
+        return
+    placeholders = ", ".join(f":id_{i}" for i in range(len(source_ids)))
+    params: dict[str, Any] = {f"id_{i}": sid for i, sid in enumerate(source_ids)}
+    params["article_id"] = article_id
+    await session.execute(
+        text(f"""
+            UPDATE news_sources
+            SET processed = true, article_id = :article_id
+            WHERE id IN ({placeholders})
+        """),
+        params,
+    )
+    await session.commit()
+
+
+async def save_news_article(
+    session: AsyncSession,
+    title: str,
+    body: str,
+    summary: str,
+    category: str,
+    sources: list[str],
+    league_id: int | None = None,
+    status: str = "published",
+) -> int:
+    """Insert a news article and return id."""
+    import json
+
+    slug = _make_slug(title)
+    is_published = status == "published"
+    result = await session.execute(
+        text("""
+            INSERT INTO news_articles
+                (title, slug, body, summary, category, sources, league_id,
+                 status, published_at)
+            VALUES
+                (:title, :slug, :body, :summary, :category,
+                 CAST(:sources AS jsonb), :league_id, :status,
+                 CASE WHEN :is_published THEN now() ELSE NULL END)
+            RETURNING id
+        """),
+        {
+            "title": title,
+            "slug": slug,
+            "body": body,
+            "summary": summary,
+            "category": category,
+            "sources": json.dumps(sources),
+            "league_id": league_id,
+            "status": status,
+            "is_published": is_published,
+        },
+    )
+    await session.commit()
+    article_id = result.scalar()
+    log.info("news_article_saved title=%s category=%s id=%s", title[:50], category, article_id)
+    return article_id
+
+
+async def fetch_recent_news(
+    session: AsyncSession, limit: int = 10, category: str | None = None
+) -> list[dict[str, Any]]:
+    """Fetch recent published news articles."""
+    where_cat = "AND category = :category" if category else ""
+    result = await session.execute(
+        text(f"""
+            SELECT id, title, summary, category, published_at
+            FROM news_articles
+            WHERE status = 'published'
+              {where_cat}
+            ORDER BY published_at DESC
+            LIMIT :limit
+        """),
+        {"limit": limit, "category": category},
+    )
     return [dict(r) for r in result.mappings().all()]
 
 
