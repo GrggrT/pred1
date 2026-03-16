@@ -58,9 +58,9 @@ async def send_to_owner(text_msg: str) -> bool:
         log.warning("TELEGRAM_OWNER_ID not set, cannot send alert")
         return False
 
-    token = (settings.telegram_bot_token or "").strip()
+    token = (settings.ai_office_bot_token or settings.telegram_bot_token or "").strip()
     if not token:
-        log.warning("TELEGRAM_BOT_TOKEN not set, cannot send alert")
+        log.warning("AI_OFFICE_BOT_TOKEN not set, cannot send alert")
         return False
 
     TG_MAX = 4096

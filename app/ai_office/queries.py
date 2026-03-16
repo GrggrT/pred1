@@ -460,7 +460,10 @@ async def cleanup_old_news(session: AsyncSession, days: int = 90) -> int:
 # ---------------------------------------------------------------------------
 
 async def fetch_scout_matches(session: AsyncSession) -> list[dict[str, Any]]:
-    """Fetch upcoming 1X2 predictions for scout analysis (next 36 hours)."""
+    """Fetch upcoming predictions for scout analysis (next 36 hours).
+
+    Includes both 1X2 (non-SKIP) and totals/DC predictions.
+    """
     result = await session.execute(text("""
         SELECT p.id as prediction_id, '1X2' as market,
                p.selection_code as selection, p.initial_odd as odd,
@@ -477,7 +480,25 @@ async def fetch_scout_matches(session: AsyncSession) -> list[dict[str, Any]]:
         WHERE f.status = 'NS'
           AND f.kickoff BETWEEN now() AND now() + interval '36 hours'
           AND p.selection_code != 'SKIP'
-        ORDER BY f.kickoff
+
+        UNION ALL
+
+        SELECT NULL::integer as prediction_id, pt.market,
+               pt.selection, pt.initial_odd as odd,
+               pt.confidence,
+               NULL::jsonb as feature_flags,
+               f.id as fixture_id, f.kickoff,
+               ht.name as home_team, att.name as away_team,
+               l.name as league
+        FROM predictions_totals pt
+        JOIN fixtures f ON f.id = pt.fixture_id
+        JOIN teams ht ON ht.id = f.home_team_id
+        JOIN teams att ON att.id = f.away_team_id
+        JOIN leagues l ON l.id = f.league_id
+        WHERE f.status = 'NS'
+          AND f.kickoff BETWEEN now() AND now() + interval '36 hours'
+
+        ORDER BY kickoff, market
     """))
     return [dict(r) for r in result.mappings().all()]
 

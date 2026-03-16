@@ -390,9 +390,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def build_bot() -> Application:
     """Build and configure the Telegram bot application."""
-    token = (settings.telegram_bot_token or "").strip()
+    token = (settings.ai_office_bot_token or settings.telegram_bot_token or "").strip()
     if not token:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured for AI Office bot")
+        raise RuntimeError("AI_OFFICE_BOT_TOKEN (or TELEGRAM_BOT_TOKEN) is not configured")
 
     app = (
         Application.builder()

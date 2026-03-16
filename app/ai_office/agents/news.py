@@ -38,6 +38,8 @@ _CAT_EMOJI = {
 
 # Max items per feed to avoid overwhelming the LLM
 _MAX_PER_FEED = 20
+# Max articles to publish per single run (drip-feed throughout the day)
+_MAX_PER_RUN = 3
 
 
 # ---------------------------------------------------------------------------
@@ -206,26 +208,46 @@ async def _generate_article(
 # Telegram formatting
 # ---------------------------------------------------------------------------
 
-def _format_news_telegram(articles: list[dict[str, Any]]) -> str:
-    """Format published articles as a Telegram digest."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines = [f"📰 <b>Новости футбола</b> | {now_str}", ""]
+def _format_single_article(article: dict[str, Any]) -> str:
+    """Format a single article as an individual Telegram message."""
+    emoji = _CAT_EMOJI.get(article.get("category", ""), "📌")
+    cat_ru = {
+        "injury": "Травма",
+        "transfer": "Трансфер",
+        "preview": "Превью",
+        "review": "Обзор",
+        "standings": "Таблица",
+    }.get(article.get("category", ""), "Новость")
 
-    for a in articles[:10]:  # max 10 in one message
+    lines = [
+        f"{emoji} <b>[{cat_ru}]</b> {article['title']}",
+        "",
+    ]
+    if article.get("body"):
+        # Use body (full text), trim to reasonable Telegram length
+        body = article["body"]
+        if len(body) > 1500:
+            body = body[:1500] + "..."
+        lines.append(body)
+    elif article.get("summary"):
+        lines.append(article["summary"])
+
+    return "\n".join(lines)
+
+
+def _format_news_digest(articles: list[dict[str, Any]]) -> str:
+    """Format multiple articles as a compact digest for save_report."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    lines = [f"📰 <b>Новости</b> | {now_str}", ""]
+
+    for a in articles[:10]:
         emoji = _CAT_EMOJI.get(a.get("category", ""), "📌")
-        cat_ru = {
-            "injury": "Травма",
-            "transfer": "Трансфер",
-            "preview": "Превью",
-            "review": "Обзор",
-            "standings": "Таблица",
-        }.get(a.get("category", ""), "Новость")
-        lines.append(f"{emoji} <b>[{cat_ru}]</b> {a['title']}")
+        lines.append(f"{emoji} {a['title']}")
         if a.get("summary"):
-            lines.append(f"{a['summary']}")
+            lines.append(f"  {a['summary']}")
         lines.append("")
 
-    lines.append(f"Всего: {len(articles)} статей опубликовано")
+    lines.append(f"Опубликовано: {len(articles)}")
     return "\n".join(lines)
 
 
@@ -334,9 +356,13 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             "reason": "nothing relevant after filter",
         }
 
-    # 6. Generate articles via Groq (one call per article)
+    # 6. Generate articles via Groq — limited to _MAX_PER_RUN per invocation
+    #    Remaining articles stay unprocessed for the next hourly run (drip-feed)
     published: list[dict[str, Any]] = []
     for idx in relevant_indices:
+        if len(published) >= _MAX_PER_RUN:
+            log.info("news_drip_limit reached=%d, rest deferred to next run", _MAX_PER_RUN)
+            break
         if idx >= len(unprocessed):
             continue
         source = unprocessed[idx]
@@ -353,9 +379,14 @@ async def run(session: AsyncSession) -> dict[str, Any]:
                 )
                 await mark_sources_processed(session, [source["id"]], article_id)
                 published.append(article_data)
+
+                # Send each article as a separate Telegram message (natural pace)
+                msg = _format_single_article(article_data)
+                sent_ok = await send_to_owner(msg)
                 log.info(
-                    "news_article_created id=%s cat=%s title=%s",
-                    article_id, article_data["category"], article_data["title"][:50],
+                    "news_article_published id=%s cat=%s sent=%s title=%s",
+                    article_id, article_data["category"], sent_ok,
+                    article_data["title"][:50],
                 )
             else:
                 await mark_sources_processed(session, [source["id"]])
@@ -375,22 +406,24 @@ async def run(session: AsyncSession) -> dict[str, Any]:
                     pass
 
     log.info(
-        "news_generation_done relevant=%d published=%d",
+        "news_generation_done relevant=%d published=%d deferred=%d",
         len(relevant_indices), len(published),
+        max(0, len(relevant_indices) - _MAX_PER_RUN - len([
+            i for i, s in enumerate(unprocessed)
+            if i not in set(relevant_indices)
+        ])),
     )
 
-    # 7. Send Telegram digest
-    sent = False
+    # 7. Save digest report to DB (for monitoring / agent freshness)
     if published:
-        report = _format_news_telegram(published)
-        sent = await send_to_owner(report)
+        report = _format_news_digest(published)
         await save_report(
             session,
             agent="news",
             report_type="news_digest",
             report_text=report,
             metadata={"fetched": new_count, "published": len(published)},
-            telegram_sent=sent,
+            telegram_sent=True,
         )
 
     return {

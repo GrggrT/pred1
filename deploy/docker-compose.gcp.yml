@@ -68,8 +68,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    environment:
-      TELEGRAM_BOT_TOKEN: "${AI_OFFICE_BOT_TOKEN}"
     command: >
       python -m app.ai_office.runner
     healthcheck:

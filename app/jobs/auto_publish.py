@@ -72,7 +72,7 @@ async def run(session: AsyncSession):
     # ── Import here to avoid circular imports ─────────────────────
     from app.services.publishing import publish_fixture
 
-    window_hours = int(getattr(settings, "auto_publish_window_hours", 48) or 48)
+    window_hours = int(settings.auto_publish_window_hours or 48)
     cutoff = now + timedelta(hours=window_hours)
 
     # ── Step 1: find unpublished fixtures ─────────────────────────

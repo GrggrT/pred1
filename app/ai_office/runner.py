@@ -126,8 +126,9 @@ async def main() -> None:
     log.info("ai_office_starting")
 
     # Validate required config
-    if not settings.telegram_bot_token:
-        log.error("TELEGRAM_BOT_TOKEN is required for AI Office")
+    _bot_token = (settings.ai_office_bot_token or settings.telegram_bot_token or "").strip()
+    if not _bot_token:
+        log.error("AI_OFFICE_BOT_TOKEN (or TELEGRAM_BOT_TOKEN) is required for AI Office")
         sys.exit(1)
 
     if not settings.telegram_owner_id:

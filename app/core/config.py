@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     publish_metrics_window_hours: int = Field(default=24, alias="PUBLISH_METRICS_WINDOW_HOURS")
     publish_quiet_before_utc_hour: int = Field(default=6, alias="PUBLISH_QUIET_BEFORE_UTC_HOUR")
     publish_html_fallback_alert_pct: Decimal = Field(default=Decimal("15"), alias="PUBLISH_HTML_FALLBACK_ALERT_PCT")
+    publish_ideal_interval_seconds: int = Field(default=3600, alias="PUBLISH_IDEAL_INTERVAL_SECONDS")
+    publish_deadline_buffer_seconds: int = Field(default=3600, alias="PUBLISH_DEADLINE_BUFFER_SECONDS")
+    publish_min_interval_seconds: int = Field(default=60, alias="PUBLISH_MIN_INTERVAL_SECONDS")
+    auto_publish_window_hours: int = Field(default=48, alias="AUTO_PUBLISH_WINDOW_HOURS")
 
     groq_api_key: str = Field("", alias="GROQ_API_KEY")
     groq_api_base: str = Field("https://api.groq.com/openai/v1", alias="GROQ_API_BASE")
@@ -74,6 +78,7 @@ class Settings(BaseSettings):
     groq_enabled: bool = Field(default=False, alias="GROQ_ENABLED")
 
     # AI Office
+    ai_office_bot_token: str = Field("", alias="AI_OFFICE_BOT_TOKEN")
     telegram_owner_id: str = Field("", alias="TELEGRAM_OWNER_ID")
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
     gemini_model: str = Field("gemini-2.5-flash", alias="GEMINI_MODEL")
@@ -82,7 +87,7 @@ class Settings(BaseSettings):
     ai_office_analyst_cron: str = Field("0 8 * * *", alias="AI_OFFICE_ANALYST_CRON")
     ai_office_content_picks_cron: str = Field("0 12 * * *", alias="AI_OFFICE_CONTENT_PICKS_CRON")
     ai_office_scout_cron: str = Field("0 10 * * *", alias="AI_OFFICE_SCOUT_CRON")
-    ai_office_news_cron: str = Field("0 */4 * * *", alias="AI_OFFICE_NEWS_CRON")
+    ai_office_news_cron: str = Field("0 * * * *", alias="AI_OFFICE_NEWS_CRON")
     ai_office_researcher_cron: str = Field("0 10 * * 0", alias="AI_OFFICE_RESEARCHER_CRON")
     ai_office_news_feeds: str = Field(
         "https://feeds.bbci.co.uk/sport/football/rss.xml,"
