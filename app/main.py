@@ -5003,7 +5003,8 @@ async def public_news(
         text(f"""
             SELECT id, title, slug, summary, body, category,
                    league_id, sources, published_at,
-                   meta_description, tags, reading_time, word_count, author
+                   meta_description, tags, reading_time, word_count, author,
+                   image_url
             FROM news_articles
             WHERE status = 'published'
               {where_cat}
@@ -5030,6 +5031,7 @@ async def public_news(
                 "reading_time": r.reading_time,
                 "word_count": r.word_count,
                 "author": r.author or "FVB AI Analytics",
+                "image_url": r.image_url,
             }
             for r in res.fetchall()
         ]
@@ -5076,7 +5078,8 @@ async def public_news_by_slug(
             SELECT id, title, slug, summary, body, category,
                    league_id, fixture_id, home_team_name, away_team_name,
                    sources, published_at, created_at,
-                   meta_description, tags, reading_time, word_count, author
+                   meta_description, tags, reading_time, word_count, author,
+                   image_url
             FROM news_articles
             WHERE slug = :slug AND status = 'published'
             LIMIT 1
@@ -5106,6 +5109,7 @@ async def public_news_by_slug(
         "reading_time": row.reading_time,
         "word_count": row.word_count,
         "author": row.author or "FVB AI Analytics",
+        "image_url": row.image_url,
     }
 
 

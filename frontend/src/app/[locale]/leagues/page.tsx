@@ -29,6 +29,13 @@ export async function generateMetadata({
       canonical: `/${locale}/leagues`,
       languages: alternates,
     },
+    openGraph: {
+      type: 'website',
+      title: t('leaguesTitle'),
+      description: t('leaguesDescription'),
+      url: `${SITE_URL}/${locale}/leagues`,
+      siteName: t('siteName'),
+    },
   };
 }
 

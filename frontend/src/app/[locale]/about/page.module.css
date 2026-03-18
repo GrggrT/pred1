@@ -120,6 +120,40 @@
   line-height: 1.4;
 }
 
+/* Methodology cards */
+.methodGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.methodCard {
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  transition: border-color 0.15s ease;
+}
+
+.methodCard:hover {
+  border-color: var(--border);
+}
+
+.methodCardTitle {
+  font-family: var(--font-display);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.methodCardText {
+  font-size: var(--font-size-sm);
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
 /* Disclaimer */
 .disclaimer {
   margin-top: 40px;

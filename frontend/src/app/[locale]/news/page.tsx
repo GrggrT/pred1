@@ -29,6 +29,13 @@ export async function generateMetadata({
       canonical: `/${locale}/news`,
       languages: alternates,
     },
+    openGraph: {
+      type: 'website',
+      title: t('newsTitle'),
+      description: t('newsDescription'),
+      url: `${SITE_URL}/${locale}/news`,
+      siteName: t('siteName'),
+    },
   };
 }
 

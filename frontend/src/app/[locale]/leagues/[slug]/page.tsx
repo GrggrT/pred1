@@ -53,12 +53,21 @@ export async function generateMetadata({
       alternates[loc] = `/${loc}/leagues/${slug}`;
     }
 
+    const description = `${league.name} (${league.country}) — standings, predictions, stats`;
     return {
       title,
-      description: `${league.name} (${league.country}) — standings, predictions, stats`,
+      description,
       alternates: {
         canonical: `/${locale}/leagues/${slug}`,
         languages: alternates,
+      },
+      openGraph: {
+        type: 'website',
+        title,
+        description,
+        url: `${SITE_URL}/${locale}/leagues/${slug}`,
+        siteName: 'Football Value Bets',
+        images: league.logo_url ? [{ url: league.logo_url }] : undefined,
       },
     };
   } catch {

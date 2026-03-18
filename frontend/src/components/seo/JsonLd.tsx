@@ -58,7 +58,7 @@ export function newsArticleJsonLd(article: {
       name: 'Football Value Bets',
       url: siteUrl,
     },
-    image: article.image_url || `${siteUrl}/og-default.png`,
+    image: article.image_url || `${siteUrl}/${locale}/news/${article.slug}/opengraph-image`,
     keywords: article.tags?.join(', ') || undefined,
     articleSection: article.category || undefined,
     wordCount: article.word_count || undefined,

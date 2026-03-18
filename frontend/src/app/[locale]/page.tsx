@@ -30,6 +30,13 @@ export async function generateMetadata({
       canonical: `/${locale}`,
       languages: alternates,
     },
+    openGraph: {
+      type: 'website',
+      title: t('homeTitle'),
+      description: t('siteDescription'),
+      url: `${SITE_URL}/${locale}`,
+      siteName: t('siteName'),
+    },
   };
 }
 

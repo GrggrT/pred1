@@ -28,6 +28,14 @@ export async function generateMetadata({
       canonical: `/${locale}/about`,
       languages: alternates,
     },
+    openGraph: {
+      type: 'website',
+      title: t('aboutTitle'),
+      description: t('aboutDescription'),
+      url: `${SITE_URL}/${locale}/about`,
+      siteName: t('siteName'),
+      images: [{ url: `${SITE_URL}/opengraph-image`, width: 1200, height: 630 }],
+    },
   };
 }
 
@@ -105,6 +113,39 @@ export default async function AboutPage({
           </div>
         </section>
 
+        {/* Methodology Deep Dive */}
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>{t('methodologyTitle')}</h2>
+          <p className={styles.text}>{t('methodologyIntro')}</p>
+
+          <div className={styles.methodGrid}>
+            <div className={styles.methodCard}>
+              <h3 className={styles.methodCardTitle}>{t('dixonColesTitle')}</h3>
+              <p className={styles.methodCardText}>{t('dixonColesText')}</p>
+            </div>
+            <div className={styles.methodCard}>
+              <h3 className={styles.methodCardTitle}>{t('eloTitle')}</h3>
+              <p className={styles.methodCardText}>{t('eloText')}</p>
+            </div>
+            <div className={styles.methodCard}>
+              <h3 className={styles.methodCardTitle}>{t('stackingTitle')}</h3>
+              <p className={styles.methodCardText}>{t('stackingText')}</p>
+            </div>
+          </div>
+        </section>
+
+        {/* Data Sources */}
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>{t('dataSourcesTitle')}</h2>
+          <p className={styles.text}>{t('dataSourcesText')}</p>
+        </section>
+
+        {/* Transparency */}
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>{t('transparencyTitle')}</h2>
+          <p className={styles.text}>{t('transparencyText')}</p>
+        </section>
+
         {/* Leagues */}
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>{t('leaguesTitle')}</h2>
@@ -115,6 +156,12 @@ export default async function AboutPage({
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>{t('technologyTitle')}</h2>
           <p className={styles.text}>{t('technologyText')}</p>
+        </section>
+
+        {/* Team */}
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>{t('teamTitle')}</h2>
+          <p className={styles.text}>{t('teamText')}</p>
         </section>
 
         {/* Disclaimer */}
