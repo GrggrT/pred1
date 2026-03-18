@@ -126,7 +126,7 @@ def _check_public_rate(request: Request):
     cutoff = now - 60
     hits = PUBLIC_API_RATE.get(ip, [])
     PUBLIC_API_RATE[ip] = [t for t in hits if t > cutoff]
-    if len(PUBLIC_API_RATE[ip]) >= 60:
+    if len(PUBLIC_API_RATE[ip]) >= 120:
         raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": "60"})
     PUBLIC_API_RATE[ip].append(now)
 
@@ -4449,7 +4449,7 @@ async def public_leagues(
         return []
     res = await session.execute(
         text("""
-            SELECT DISTINCT l.id, l.name, l.country, l.logo_url
+            SELECT DISTINCT l.id, l.name, l.country, l.logo_url, l.slug
             FROM leagues l
             WHERE l.id IN (SELECT unnest(CAST(:ids AS integer[])))
             ORDER BY l.name
@@ -4460,18 +4460,18 @@ async def public_leagues(
     if not rows:
         res2 = await session.execute(
             text("""
-                SELECT DISTINCT f.league_id AS id, l.name, l.country, l.logo_url
+                SELECT DISTINCT f.league_id AS id, l.name, l.country, l.logo_url, l.slug
                 FROM fixtures f
                 LEFT JOIN leagues l ON l.id = f.league_id
                 WHERE f.league_id IN (SELECT unnest(CAST(:ids AS integer[])))
-                GROUP BY f.league_id, l.name, l.country, l.logo_url
+                GROUP BY f.league_id, l.name, l.country, l.logo_url, l.slug
                 ORDER BY l.name NULLS LAST
             """),
             {"ids": league_ids},
         )
         rows = res2.fetchall()
     return [
-        {"id": int(r.id), "name": r.name or f"League {r.id}", "country": r.country or "", "logo_url": r.logo_url or ""}
+        {"id": int(r.id), "name": r.name or f"League {r.id}", "country": r.country or "", "logo_url": r.logo_url or "", "slug": getattr(r, "slug", "") or ""}
         for r in rows
     ]
 
@@ -5027,6 +5027,104 @@ async def public_news(
             }
             for r in res.fetchall()
         ]
+    }
+
+
+@app.get("/api/public/v1/news/slugs")
+async def public_news_slugs(
+    _rate: None = Depends(_check_public_rate),
+    *,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    """All published news slugs — for sitemap generation."""
+    res = await session.execute(
+        text("""
+            SELECT slug, published_at
+            FROM news_articles
+            WHERE status = 'published'
+            ORDER BY published_at DESC
+        """)
+    )
+    response.headers["Cache-Control"] = "public, max-age=600"
+    return [
+        {
+            "slug": r.slug,
+            "published_at": r.published_at.isoformat() if r.published_at else None,
+        }
+        for r in res.fetchall()
+    ]
+
+
+@app.get("/api/public/v1/news/{slug}")
+async def public_news_by_slug(
+    slug: str,
+    _rate: None = Depends(_check_public_rate),
+    *,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    """Single news article by slug."""
+    res = await session.execute(
+        text("""
+            SELECT id, title, slug, summary, body, category,
+                   league_id, fixture_id, home_team_name, away_team_name,
+                   sources, published_at, created_at
+            FROM news_articles
+            WHERE slug = :slug AND status = 'published'
+            LIMIT 1
+        """),
+        {"slug": slug},
+    )
+    row = res.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Article not found")
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {
+        "id": row.id,
+        "title": row.title,
+        "slug": row.slug,
+        "summary": row.summary,
+        "body": row.body,
+        "category": row.category,
+        "league_id": row.league_id,
+        "fixture_id": row.fixture_id,
+        "home_team_name": row.home_team_name,
+        "away_team_name": row.away_team_name,
+        "sources": row.sources,
+        "published_at": row.published_at.isoformat() if row.published_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+@app.get("/api/public/v1/leagues/{slug}")
+async def public_league_by_slug(
+    slug: str,
+    _rate: None = Depends(_check_public_rate),
+    *,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    """League detail by slug — basic info, for use with other endpoints."""
+    res = await session.execute(
+        text("""
+            SELECT id, name, country, logo_url, slug
+            FROM leagues
+            WHERE slug = :slug
+            LIMIT 1
+        """),
+        {"slug": slug},
+    )
+    row = res.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="League not found")
+    response.headers["Cache-Control"] = "public, max-age=600"
+    return {
+        "id": int(row.id),
+        "name": row.name,
+        "country": row.country,
+        "logo_url": row.logo_url or "",
+        "slug": row.slug,
     }
 
 

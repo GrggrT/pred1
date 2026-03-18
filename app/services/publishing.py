@@ -4329,13 +4329,28 @@ async def publish_fixture(
                             )
                             image_bytes = await _card_gen_v2_render(v2_card)
                             render_time_ms = int((time.perf_counter() - render_started) * 1000)
-                            photo_id = await send_photo(channel_id, image_bytes)
-                            headline_ids = [photo_id]
-                            analysis_ids = await send_message_parts(
-                                channel_id,
-                                analysis_parts,
-                                reply_to_message_id=photo_id,
-                            )
+                            # Caption mode: image + text in ONE Telegram message
+                            caption_text = "\n".join(analysis_parts)
+                            if len(caption_text) <= 1024:
+                                photo_id = await send_photo(
+                                    channel_id, image_bytes, caption=caption_text,
+                                )
+                                headline_ids = [photo_id]
+                                analysis_ids = []
+                            else:
+                                # Caption too long — send photo with truncated
+                                # caption, then remainder as reply
+                                photo_id = await send_photo(
+                                    channel_id, image_bytes,
+                                    caption=caption_text[:1024],
+                                )
+                                headline_ids = [photo_id]
+                                remainder = caption_text[1024:]
+                                analysis_ids = await send_message_parts(
+                                    channel_id,
+                                    [remainder],
+                                    reply_to_message_id=photo_id,
+                                )
                             used_headline_image = True
                         except Exception:
                             render_time_ms = int((time.perf_counter() - render_started) * 1000)
@@ -4376,13 +4391,26 @@ async def publish_fixture(
                                 **html_image_kwargs,
                             )
                             render_time_ms = int((time.perf_counter() - render_started) * 1000)
-                            photo_id = await send_photo(channel_id, image_bytes)
-                            headline_ids = [photo_id]
-                            analysis_ids = await send_message_parts(
-                                channel_id,
-                                analysis_parts,
-                                reply_to_message_id=photo_id,
-                            )
+                            # Caption mode: image + text in ONE Telegram message
+                            caption_text = "\n".join(analysis_parts)
+                            if len(caption_text) <= 1024:
+                                photo_id = await send_photo(
+                                    channel_id, image_bytes, caption=caption_text,
+                                )
+                                headline_ids = [photo_id]
+                                analysis_ids = []
+                            else:
+                                photo_id = await send_photo(
+                                    channel_id, image_bytes,
+                                    caption=caption_text[:1024],
+                                )
+                                headline_ids = [photo_id]
+                                remainder = caption_text[1024:]
+                                analysis_ids = await send_message_parts(
+                                    channel_id,
+                                    [remainder],
+                                    reply_to_message_id=photo_id,
+                                )
                             used_headline_image = True
                         except Exception:
                             render_time_ms = int((time.perf_counter() - render_started) * 1000)
