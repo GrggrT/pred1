@@ -39,6 +39,14 @@
 
   var LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE'];
 
+  var NEWS_CAT = {
+    preview:   { emoji: '\u26BD', label: '\u041F\u0440\u0435\u0432\u044C\u044E' },
+    review:    { emoji: '\uD83D\uDCCB', label: '\u041E\u0431\u0437\u043E\u0440' },
+    injury:    { emoji: '\uD83E\uDE79', label: '\u0422\u0440\u0430\u0432\u043C\u044B' },
+    transfer:  { emoji: '\uD83D\uDD04', label: '\u0422\u0440\u0430\u043D\u0441\u0444\u0435\u0440\u044B' },
+    standings: { emoji: '\uD83D\uDCC8', label: '\u0422\u0430\u0431\u043B\u0438\u0446\u0430' },
+  };
+
   var COUNTRY_FLAGS = {
     'England': '\uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62\uDB40\uDC65\uDB40\uDC6E\uDB40\uDC67\uDB40\uDC7F',
     'Spain': '\uD83C\uDDEA\uD83C\uDDF8',
@@ -56,10 +64,8 @@
   var currentView = 'predictions';
   var selectedDate = 'today';
   var marketFilter = 'all';
-  var activeLeague = null;
-  var favLeagues = _load('fav_leagues', [39, 140]);
-  var collapsedLeagues = {};
   var expandedMatch = null;
+  var selectedLeague = null;
   var pubDays = +(_load('days', 90));
   var leaguesCache = null;
   var matchesData = [];
@@ -75,7 +81,9 @@
   var resultsLeagueFilter = null;
   var resultsMarketFilter = 'all';
   var resultsDisplayCount = 20;
-  var standingsExpanded = false;
+  var newsCache = null;
+  var newsShowAll = false;
+  var collapsedLeagues = {};
 
   // ═══ DOM HELPERS ═══
   // NOTE: All user-facing data is escaped via esc() before being inserted into
@@ -119,6 +127,27 @@
   function formatTime(iso) {
     if (!iso) return '';
     return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function timeAgo(iso) {
+    if (!iso) return '';
+    var diff = Date.now() - new Date(iso).getTime();
+    if (diff < 0) return '\u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u043E';
+    var sec = Math.floor(diff / 1000);
+    if (sec < 60) return '\u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u043E';
+    var min = Math.floor(sec / 60);
+    if (min < 60) return min + ' \u043C\u0438\u043D \u043D\u0430\u0437\u0430\u0434';
+    var hrs = Math.floor(min / 60);
+    if (hrs < 24) return hrs + '\u0447 \u043D\u0430\u0437\u0430\u0434';
+    var days = Math.floor(hrs / 24);
+    if (days === 1) return '\u0432\u0447\u0435\u0440\u0430';
+    if (days < 7) return days + ' \u0434\u043D \u043D\u0430\u0437\u0430\u0434';
+    return formatDateShort(iso);
+  }
+
+  function isFreshNews(iso) {
+    if (!iso) return false;
+    return (Date.now() - new Date(iso).getTime()) < 3600000;
   }
 
   function logoImg(url, alt, size) {
@@ -241,6 +270,8 @@
     return '<span class="ev-badge ' + cls + '">' + txt + '</span>';
   }
 
+  function fmtPct(v) { return v != null ? (v * 100).toFixed(1) + '%' : '\u2014'; }
+
   // ═══ DATE HELPERS ═══
   function addDays(d, n) { var r = new Date(d); r.setDate(r.getDate() + n); return r; }
 
@@ -273,40 +304,71 @@
     }
   }
 
-  // ═══ RENDER: LEFT SIDEBAR ═══
-  // All data displayed in sidebar comes from our own API and is escaped via esc()
-  function renderSidebar() {
-    if (!leaguesCache) return;
-    var favList = el('sb-fav-list');
-    var allList = el('sb-league-list');
-    if (!favList || !allList) return;
+  // ═══ RENDER: NEWS ═══
+  function renderNews() {
+    var container = el('sb-news-list');
+    if (!container) return;
+    if (!newsCache || newsCache.length === 0) {
+      container.innerHTML = '<div style="padding:6px 10px;font-size:11px;color:var(--muted)">\u041D\u0435\u0442 \u043D\u043E\u0432\u043E\u0441\u0442\u0435\u0439</div>';
+      return;
+    }
 
-    var counts = {};
-    matchesData.forEach(function (m) {
-      if (m.league_id) counts[m.league_id] = (counts[m.league_id] || 0) + 1;
-    });
+    var limit = newsShowAll ? newsCache.length : 8;
+    var items = newsCache.slice(0, limit);
+    var html = '';
 
-    var favHtml = '';
-    var allHtml = '';
-
-    leaguesCache.forEach(function (l) {
-      var isFav = favLeagues.indexOf(l.id) >= 0;
-      var isActive = activeLeague === l.id;
-      var flag = COUNTRY_FLAGS[l.country] || '\u26BD';
-      var count = counts[l.id] || 0;
-      var btn = '<button class="sb-league' + (isActive ? ' active' : '') + '" data-league-id="' + l.id + '" title="' + esc(l.name) + '">' +
-        '<span class="sb-league-flag">' + flag + '</span>' +
-        '<span class="sb-league-name">' + esc(l.name) + '</span>' +
-        (count > 0 ? '<span class="sb-league-count">' + count + '</span>' : '') +
-        '<span class="sb-star' + (isFav ? ' active' : '') + '" role="button" tabindex="0" data-fav="' + l.id + '" aria-label="Избранное">' + (isFav ? '\u2605' : '\u2606') + '</span>' +
+    items.forEach(function (a) {
+      var cat = NEWS_CAT[a.category] || NEWS_CAT.standings;
+      var fresh = isFreshNews(a.published_at);
+      html += '<button class="nw-item" data-cat="' + esc(a.category || 'standings') + '" data-news-id="' + a.id + '">' +
+        '<div class="nw-cat">' + cat.emoji + ' ' + esc(cat.label) + '</div>' +
+        '<div class="nw-title">' + esc(a.title) + '</div>' +
+        '<div class="nw-time' + (fresh ? ' nw-fresh' : '') + '">' + timeAgo(a.published_at) + '</div>' +
         '</button>';
-
-      if (isFav) favHtml += btn;
-      allHtml += btn;
     });
 
-    favList.innerHTML = favHtml || '<div style="padding:6px 10px;font-size:11px;color:var(--muted)">Нет избранных</div>';
-    allList.innerHTML = allHtml;
+    if (!newsShowAll && newsCache.length > 8) {
+      html += '<button class="nw-more" id="nw-show-more">\u0415\u0449\u0451 ' + (newsCache.length - 8) + ' \u2192</button>';
+    }
+
+    container.innerHTML = html;
+  }
+
+  function showNewsModal(newsId) {
+    if (!newsCache) return;
+    var article = null;
+    for (var i = 0; i < newsCache.length; i++) {
+      if (newsCache[i].id === newsId) { article = newsCache[i]; break; }
+    }
+    if (!article) return;
+
+    var cat = NEWS_CAT[article.category] || NEWS_CAT.standings;
+    var catEl = el('news-modal-cat');
+    var bodyEl = el('news-modal-body');
+    if (!catEl || !bodyEl) return;
+
+    catEl.setAttribute('data-cat', article.category || 'standings');
+    catEl.innerHTML = cat.emoji + ' ' + esc(cat.label);
+
+    var html = '';
+    html += '<div class="news-modal-time">' + (article.published_at ? formatDate(article.published_at) : '') + '</div>';
+    if (article.summary) {
+      html += '<div class="news-modal-summary">' + esc(article.summary) + '</div>';
+    }
+    if (article.body) {
+      html += '<div class="news-modal-body-text">' + esc(article.body).replace(/\n/g, '<br>') + '</div>';
+    }
+    if (article.sources && article.sources.length) {
+      html += '<div class="news-modal-sources">\u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438: ';
+      article.sources.forEach(function (src, idx) {
+        if (idx > 0) html += ', ';
+        html += '<a href="' + esc(src) + '" target="_blank" rel="noopener">' + esc(src.replace(/^https?:\/\//, '').split('/')[0]) + '</a>';
+      });
+      html += '</div>';
+    }
+
+    bodyEl.innerHTML = html;
+    el('news-modal').style.display = 'flex';
   }
 
   // ═══ RENDER: DATE SLIDER ═══
@@ -343,7 +405,6 @@
         var kickoff = new Date(m.kickoff).getTime();
         if (kickoff < from || kickoff >= to) return false;
       }
-      if (activeLeague && m.league_id !== activeLeague) return false;
       if (marketFilter === 'value') return m.ev != null && m.ev >= 0.08;
       if (marketFilter !== 'all') {
         if (marketFilter === 'TOTAL') return m.market && m.market.indexOf('TOTAL') === 0;
@@ -421,7 +482,6 @@
     });
 
     feed.innerHTML = html;
-    renderTopValue(matches);
   }
 
   function renderMatchRow(m, allPreds) {
@@ -433,36 +493,72 @@
     var marketLabel = MARKET_LABELS[m.market] || m.market || '1X2';
     var extraCount = allPreds.length - 1;
 
-    var html = '<div class="match-row' + (isExpanded ? ' expanded' : '') + (isLive ? ' live' : '') + '" data-match-key="' + _matchKey(m) + '" tabindex="0">';
-    html += '<div class="match-main">';
+    // EV tag
+    var evVal = m.ev != null ? (m.ev * 100).toFixed(1) : null;
+    var evClass = evVal >= 10 ? 'ev-high' : evVal >= 5 ? 'ev-mid' : 'ev-low';
 
+    var html = '<div class="match-card' + (isExpanded ? ' expanded' : '') + (isLive ? ' live' : '') + '" data-match-key="' + _matchKey(m) + '">';
+
+    // ── Card header: time + date + EV ──
+    html += '<div class="match-card-header">';
     if (isLive) {
-      html += '<div class="match-time"><span class="match-live"><span class="match-live-dot"></span>LIVE</span></div>';
+      html += '<span class="match-live"><span class="match-live-dot"></span>LIVE</span>';
     } else {
-      html += '<div class="match-time">' + formatTime(m.kickoff) + '</div>';
+      html += '<span class="match-card-time">' + formatTime(m.kickoff) + '</span>';
     }
-
-    html += '<div class="match-teams">'
-         + logoImg(m.home_logo_url, m.home, 18)
-         + '<span class="match-team-name">' + esc(m.home) + '</span>'
-         + '<span class="match-team-sep">\u2014</span>'
-         + '<span class="match-team-name">' + esc(m.away) + '</span>'
-         + logoImg(m.away_logo_url, m.away, 18);
-    if (extraCount > 0) {
-      html += ' <span class="match-extra-badge">+' + extraCount + '</span>';
+    html += '<span class="match-card-date">';
+    if (m.kickoff) {
+      var ko = new Date(m.kickoff);
+      html += ko.toLocaleDateString('ru', { day: 'numeric', month: 'short' });
+    }
+    html += '</span>';
+    if (evVal) {
+      html += '<span class="match-ev-tag ' + evClass + '">EV ' + (evVal >= 0 ? '+' : '') + evVal + '%</span>';
     }
     html += '</div>';
 
+    // ── Teams row ──
+    html += '<div class="match-teams-row">';
+    html += '<div class="match-team home">'
+         + '<img class="match-team-logo" src="' + esc(m.home_logo_url || '') + '" alt="" onerror="this.style.display=\'none\'">'
+         + '<span class="match-team-name">' + esc(m.home) + '</span>'
+         + '</div>';
     if (hasScore) {
       html += '<div class="match-score">' + esc(m.score) + '</div>';
     } else {
       html += '<div class="match-vs">VS</div>';
     }
+    html += '<div class="match-team away">'
+         + '<img class="match-team-logo" src="' + esc(m.away_logo_url || '') + '" alt="" onerror="this.style.display=\'none\'">'
+         + '<span class="match-team-name">' + esc(m.away) + '</span>'
+         + '</div>';
+    html += '</div>';
 
-    html += '<div class="match-pick"><span class="match-pick-market">' + esc(marketLabel) + '</span><span class="match-pick-sel">' + esc(pickLabel) + '</span></div>';
-    html += '<div class="match-odd">' + (m.odd != null ? m.odd.toFixed(2) : '\u2014') + '</div>';
-    html += '<div>' + renderValueBadge(m.ev) + '</div>';
-    html += '<div class="match-expand">\u203A</div>';
+    // ── Probability bar (1X2 only) ──
+    if (m.prob_home != null && m.prob_draw != null && m.prob_away != null) {
+      var ph = (m.prob_home * 100).toFixed(0);
+      var pd = (m.prob_draw * 100).toFixed(0);
+      var pa = (m.prob_away * 100).toFixed(0);
+      html += '<div class="match-prob-bar">'
+           + '<div class="prob-h" style="width:' + ph + '%"></div>'
+           + '<div class="prob-d" style="width:' + pd + '%"></div>'
+           + '<div class="prob-a" style="width:' + pa + '%"></div>'
+           + '</div>'
+           + '<div class="match-prob-labels">'
+           + '<span>' + ph + '%</span><span>' + pd + '%</span><span>' + pa + '%</span>'
+           + '</div>';
+    }
+
+    // ── Pick row (clickable to expand) ──
+    html += '<div class="match-pick-row" data-match-key="' + _matchKey(m) + '">';
+    html += '<span class="match-pick-market">' + esc(marketLabel) + '</span>';
+    html += '<span class="match-pick-label">' + esc(pickLabel);
+    if (extraCount > 0) {
+      html += ' <span class="match-extra-badge">+' + extraCount + '</span>';
+    }
+    html += '</span>';
+    html += '<span class="match-pick-odd">' + (m.odd != null ? m.odd.toFixed(2) : '\u2014') + '</span>';
+    html += '<span class="match-pick-chevron">\u25BC</span>';
     html += '</div>';
 
     if (isExpanded) {
@@ -521,8 +617,21 @@
     html += '</div>';
     html += '</div>';
 
+    // Model comparison table (1X2 predictions with probabilities)
+    if (m.prob_home != null) {
+      html += '<div class="match-model-compare"><table>';
+      html += '<tr><th>\u041C\u043E\u0434\u0435\u043B\u044C</th><th>1</th><th>X</th><th>2</th></tr>';
+      var srcLabel = m.prob_source === 'stacking' ? 'Stacking' : m.prob_source === 'dc' ? 'Dixon-Coles' : m.prob_source || 'Model';
+      html += '<tr class="active-source"><td>' + esc(srcLabel) + '</td>';
+      html += '<td>' + fmtPct(m.prob_home) + '</td><td>' + fmtPct(m.prob_draw) + '</td><td>' + fmtPct(m.prob_away) + '</td></tr>';
+      if (m.fair_odd != null && m.odd != null) {
+        html += '<tr><td>Fair / Book</td><td colspan="3">' + m.fair_odd.toFixed(2) + ' / ' + m.odd.toFixed(2) + '</td></tr>';
+      }
+      html += '</table></div>';
+    }
+
     if (m.ev != null && m.ev >= 0.10) {
-      html += '<div class="match-detail-alert">\uD83D\uDD25 Strong value \u2014 EV превышает 10%</div>';
+      html += '<div class="match-detail-alert">\uD83D\uDD25 Strong value \u2014 EV \u043F\u0440\u0435\u0432\u044B\u0448\u0430\u0435\u0442 10%</div>';
     }
     return html;
   }
@@ -583,64 +692,93 @@
     feed.innerHTML = html;
   }
 
-  // ═══ RENDER: RIGHT SIDEBAR ═══
-  function renderTrackRecord(stats) {
-    if (!stats) return;
-    animateValue(el('rs-roi'), stats.roi, { suffix: '%', decimals: 1 });
-    animateValue(el('rs-wr'), stats.win_rate, { suffix: '%', decimals: 1 });
-    animateValue(el('rs-bets'), stats.total_bets, { decimals: 0, thousands: true });
+  // ═══ RENDER: INFO STRIP (Track Record + Markets) ═══
+  var MARKET_ORDER = ['1X2', 'TOTAL', 'TOTAL_1_5', 'TOTAL_3_5', 'BTTS', 'DOUBLE_CHANCE'];
+
+  function _stripKpi(val, label, cls) {
+    return '<div class="strip-kpi"><span class="strip-kpi-val' + (cls ? ' ' + cls : '') + '">' + val + '</span><span class="strip-kpi-lbl">' + label + '</span></div>';
+  }
+
+  function renderInfoStrip(stats, marketData) {
+    var trackEl = el('strip-track');
+    var mktEl = el('strip-markets');
+    if (!trackEl || !mktEl) return;
+
+    // Track Record KPIs
+    var th = '';
+    if (stats) {
+      var roiVal = stats.roi != null ? (stats.roi >= 0 ? '+' : '') + stats.roi.toFixed(1) + '%' : '--';
+      var roiCls = stats.roi > 0 ? 'positive' : stats.roi < 0 ? 'negative' : '';
+      var wrVal = stats.win_rate != null ? stats.win_rate.toFixed(1) + '%' : '--';
+      var betsVal = stats.total_bets != null ? String(stats.total_bets) : '--';
+      var profVal = stats.total_profit != null ? (stats.total_profit >= 0 ? '+' : '') + stats.total_profit.toFixed(1) : '--';
+      var profCls = stats.total_profit > 0 ? 'positive' : stats.total_profit < 0 ? 'negative' : '';
+      th += _stripKpi(roiVal, 'ROI', roiCls);
+      th += _stripKpi(wrVal, 'WIN%', '');
+      th += _stripKpi(betsVal, '\u0421\u0442\u0430\u0432\u043a\u0438', '');
+      th += _stripKpi(profVal, '\u041f\u0440\u043e\u0444\u0438\u0442', profCls);
+    }
+    trackEl.innerHTML = th;
+
+    // Market badges
+    var mh = '';
+    if (marketData && typeof marketData === 'object') {
+      var keys = MARKET_ORDER.filter(function (k) { return marketData[k] && marketData[k].settled > 0; });
+      keys.forEach(function (mkt) {
+        var v = marketData[mkt];
+        var label = MARKET_LABELS[mkt] || mkt;
+        var roiCls = v.roi >= 0 ? 'positive' : 'negative';
+        mh += '<div class="strip-market">';
+        mh += '<span class="strip-market-name">' + esc(label) + '</span>';
+        mh += '<span class="strip-market-roi ' + roiCls + '">' + (v.roi >= 0 ? '+' : '') + v.roi.toFixed(1) + '%</span>';
+        mh += '</div>';
+      });
+    }
+    mktEl.innerHTML = mh;
+  }
+
+  /* ── Per-market table (analytics view, also visible on mobile) ── */
+  function renderAnalyticsMarketBreakdown(data) {
+    var cont = el('an-market-breakdown-body');
+    if (!cont) return;
+    if (!data || typeof data !== 'object' || !Object.keys(data).length) {
+      cont.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">\u041d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445</div>';
+      return;
+    }
+    var keys = MARKET_ORDER.filter(function (k) { return data[k] && data[k].settled > 0; });
+    var html = '<table class="an-league-table"><thead><tr><th>\u0420\u044b\u043d\u043e\u043a</th><th>\u0421\u0442\u0430\u0432\u043e\u043a</th><th>Win%</th><th>ROI</th><th>\u041f\u0440\u043e\u0444\u0438\u0442</th></tr></thead><tbody>';
+    keys.forEach(function (mkt) {
+      var v = data[mkt];
+      var label = MARKET_LABELS[mkt] || mkt;
+      var roiCls = v.roi >= 0 ? 'positive' : 'negative';
+      var profitCls = v.total_profit >= 0 ? 'positive' : 'negative';
+      html += '<tr><td><strong>' + esc(label) + '</strong></td>';
+      html += '<td>' + v.settled + '</td>';
+      html += '<td>' + v.win_rate.toFixed(1) + '%</td>';
+      html += '<td><span class="an-profit ' + roiCls + '">' + (v.roi >= 0 ? '+' : '') + v.roi.toFixed(1) + '%</span></td>';
+      html += '<td><span class="an-profit ' + profitCls + '">' + (v.total_profit >= 0 ? '+' : '') + v.total_profit.toFixed(2) + '</span></td></tr>';
+    });
+    html += '</tbody></table>';
+    cont.innerHTML = html;
   }
 
   function renderTopValue(matches) {
-    var list = el('rs-top-list');
+    var list = el('sb-top-list');
     if (!list) return;
-    var sorted = matches.filter(function (m) { return m.ev != null; }).sort(function (a, b) { return (b.ev || 0) - (a.ev || 0); }).slice(0, 3);
+    var sorted = matches.filter(function (m) { return m.ev != null; }).sort(function (a, b) { return (b.ev || 0) - (a.ev || 0); }).slice(0, 5);
     if (!sorted.length) { list.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">Нет данных</div>'; return; }
 
     var html = '';
     sorted.forEach(function (m) {
       var fullName = (m.home || '') + ' \u2014 ' + (m.away || '');
       var shortName = _shortenTeam(m.home || '') + ' \u2014 ' + _shortenTeam(m.away || '');
-      html += '<div class="rs-top-item" data-match-key="' + _matchKey(m) + '">';
-      html += '<div class="rs-top-teams" title="' + esc(fullName) + '">' + esc(shortName) + '</div>';
-      html += '<span class="match-pick-sel" style="font-size:10px">' + esc(PICK_LABELS[m.pick] || m.pick || '') + '</span>';
-      html += '<span class="rs-top-odd">' + (m.odd != null ? m.odd.toFixed(2) : '') + '</span>';
-      html += renderValueBadge(m.ev);
-      html += '</div>';
+      html += '<button class="sb-top-item" data-match-key="' + _matchKey(m) + '">';
+      html += '<span class="sb-top-teams" title="' + esc(fullName) + '">' + esc(shortName) + '</span>';
+      html += '<span class="sb-top-pick">' + esc(PICK_LABELS[m.pick] || m.pick || '') + '</span>';
+      html += '<span class="sb-top-odd">' + (m.odd != null ? m.odd.toFixed(2) : '') + '</span>';
+      html += '</button>';
     });
     list.innerHTML = html;
-  }
-
-  // Standings mini — data from our own API, all fields escaped via esc()
-  var _standingsFullData = null;
-
-  function renderStandingsMini(data) {
-    var body = el('rs-standings-body');
-    if (!body) return;
-    if (!data || !data.length) { body.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">Нет данных</div>'; return; }
-
-    _standingsFullData = data;
-    var rows = standingsExpanded ? data : data.slice(0, 8);
-    var html = '<table class="rs-standings-table"><thead><tr><th>#</th><th>Клуб</th><th>И</th><th>О</th><th>Форма</th></tr></thead><tbody>';
-    rows.forEach(function (r) {
-      var formDots = (r.form || '').split('').map(function (ch) {
-        var cls = ch === 'W' ? 'rs-form-w' : ch === 'D' ? 'rs-form-d' : ch === 'L' ? 'rs-form-l' : '';
-        return '<span class="rs-form-dot ' + cls + '"></span>';
-      }).join('');
-
-      html += '<tr>';
-      html += '<td>' + (r.rank || '') + '</td>';
-      html += '<td><div class="rs-standings-club">' + logoImg(r.team_logo_url, r.team_name, 14) + '<span>' + esc(r.team_name || '') + '</span></div></td>';
-      html += '<td>' + (r.played || 0) + '</td>';
-      html += '<td class="rs-standings-pts">' + (r.points || 0) + '</td>';
-      html += '<td><div class="rs-form-wrap">' + formDots + '</div></td>';
-      html += '</tr>';
-    });
-    html += '</tbody></table>';
-    if (data.length > 8) {
-      html += '<button class="standings-toggle" id="standings-toggle">' + (standingsExpanded ? 'Свернуть' : 'Показать все') + '</button>';
-    }
-    body.innerHTML = html;
   }
 
   function renderStreak(results) {
@@ -994,33 +1132,7 @@
     }
   }
 
-  // ═══ HEADER STATS ═══
-  function renderHeaderStats(stats) {
-    if (!stats) return;
-    var roiEl = el('h-roi');
-    var wrEl = el('h-wr');
-    var profitEl = el('h-profit');
-    if (roiEl) { roiEl.textContent = stats.roi != null ? stats.roi.toFixed(1) + '%' : '--'; roiEl.style.color = stats.roi > 0 ? 'var(--green)' : stats.roi < 0 ? 'var(--red)' : ''; }
-    if (wrEl) wrEl.textContent = stats.win_rate != null ? stats.win_rate.toFixed(1) + '%' : '--';
-    if (profitEl) { profitEl.textContent = stats.total_profit != null ? (stats.total_profit >= 0 ? '+' : '') + stats.total_profit.toFixed(1) : '--'; profitEl.style.color = stats.total_profit > 0 ? 'var(--green)' : stats.total_profit < 0 ? 'var(--red)' : ''; }
-  }
-
-  // ═══ POPULATE LEAGUE SELECT ═══
-  function populateLeagueSelect() {
-    var sel = el('rs-league-select');
-    if (!sel || !leaguesCache || sel.options.length > 0) return;
-    leaguesCache.forEach(function (l) {
-      var opt = document.createElement('option');
-      opt.value = l.id;
-      opt.textContent = l.name;
-      sel.appendChild(opt);
-    });
-    if (favLeagues.length > 0) {
-      sel.value = favLeagues[0];
-    } else if (leaguesCache.length > 0) {
-      sel.value = leaguesCache[0].id;
-    }
-  }
+  // Header stats removed — KPIs now in info strip
 
   // ═══ LOADERS ═══
   function loadPredictions() {
@@ -1028,14 +1140,12 @@
     if (feed) feed.innerHTML = skeletonRows(6);
 
     var params = { days_ahead: 14, limit: 50 };
-    if (activeLeague) params.league_id = activeLeague;
 
     return api('/matches', params).then(function (res) {
       matchesData = res.data || [];
       renderDateSlider();
       renderPills();
       renderMatchFeed();
-      renderSidebar();
     }).catch(function (e) {
       if (_isAbort(e)) return;
       if (feed) feed.innerHTML = errorHtml('Не удалось загрузить матчи', 'predictions');
@@ -1099,7 +1209,6 @@
     if (feed) feed.innerHTML = skeletonRows(6);
 
     var params = { days: 60, limit: 200 };
-    if (activeLeague) params.league_id = activeLeague;
 
     resultsLeagueFilter = null;
     resultsMarketFilter = 'all';
@@ -1121,10 +1230,14 @@
     return Promise.all([
       api('/stats', { days: pubDays }),
       api('/results', { days: pubDays, limit: 200 }),
+      api('/market-stats', { days: pubDays }),
     ]).then(function (results) {
       var stats = results[0].data;
       var data = results[1].data;
+      var marketStats = results[2].data || {};
       renderAnalyticsStats(stats);
+      renderAnalyticsMarketBreakdown(marketStats);
+      renderInfoStrip(stats, marketStats);
       renderAnalyticsTable(data);
       renderLeagueBreakdown(data);
 
@@ -1151,38 +1264,249 @@
     }
   }
 
-  function loadStandings(leagueId) {
-    return api('/standings', { league_id: leagueId }).then(function (res) {
-      renderStandingsMini(res.data);
-    }).catch(function (e) {
-      if (!_isAbort(e)) renderStandingsMini(null);
-    });
+  function _safe(promise) {
+    return promise.then(function (r) { return r; }).catch(function () { return null; });
   }
 
   function loadInitialData() {
     return Promise.all([
-      api('/leagues'),
-      api('/stats', { days: 90 }),
-      api('/results', { days: 30, limit: 30 }),
+      _safe(api('/leagues')),
+      _safe(api('/stats', { days: 90 })),
+      _safe(api('/results', { days: 30, limit: 30 })),
+      _safe(api('/market-stats', { days: 90 })),
+      _safe(api('/news', { limit: 10 })),
     ]).then(function (results) {
-      leaguesCache = results[0].data || [];
-      renderSidebar();
-      populateLeagueSelect();
+      if (results[0]) leaguesCache = results[0].data || [];
 
-      var stats = results[1].data;
-      renderHeaderStats(stats);
-      renderTrackRecord(stats);
+      var stats = results[1] ? results[1].data : null;
+      var marketStats = results[3] ? results[3].data || {} : {};
+      if (stats) renderInfoStrip(stats, marketStats);
 
-      var recentResults = results[2].data || [];
-      renderStreak(recentResults);
-      _drawSparkline(el('h-sparkline'), recentResults, {});
-      _drawSparkline(el('rs-sparkline'), recentResults, {});
-
-      var standingsLeague = favLeagues.length > 0 ? favLeagues[0] : (leaguesCache.length > 0 ? leaguesCache[0].id : null);
-      if (standingsLeague) loadStandings(standingsLeague);
+      newsCache = (results[4] && results[4].data && results[4].data.items) || [];
+      renderNews();
     }).catch(function (e) {
       if (!_isAbort(e)) console.error('loadInitialData error', e);
     });
+  }
+
+  // ═══ LEAGUES PAGE ═══
+  var MARKET_ORDER = ['1X2', 'TOTAL', 'TOTAL_1_5', 'TOTAL_3_5', 'BTTS', 'DOUBLE_CHANCE'];
+
+  function renderLeaguePills() {
+    var container = el('leagues-pills');
+    if (!container || !leaguesCache) return;
+    var html = '';
+    leaguesCache.forEach(function (l) {
+      var flag = COUNTRY_FLAGS[l.country] || '';
+      var isActive = selectedLeague === l.id;
+      html += '<button class="league-pill' + (isActive ? ' active' : '') + '" data-league-pill="' + l.id + '">';
+      if (l.logo_url) {
+        html += '<img class="league-pill-logo" src="' + esc(l.logo_url) + '" alt="" onerror="this.style.display=\'none\'">';
+      } else if (flag) {
+        html += '<span class="league-pill-flag">' + flag + '</span>';
+      }
+      html += esc(l.name);
+      html += '</button>';
+    });
+    container.innerHTML = html;
+  }
+
+  function loadLeaguePage() {
+    renderLeaguePills();
+    if (selectedLeague) {
+      loadLeagueDetail(selectedLeague);
+    } else {
+      var det = el('league-detail');
+      var ph = el('league-placeholder');
+      if (det) det.style.display = 'none';
+      if (ph) ph.style.display = '';
+    }
+  }
+
+  function loadLeagueDetail(leagueId) {
+    selectedLeague = leagueId;
+    var det = el('league-detail');
+    var ph = el('league-placeholder');
+    if (det) det.style.display = '';
+    if (ph) ph.style.display = 'none';
+    renderLeaguePills();
+
+    var league = null;
+    if (leaguesCache) {
+      for (var li = 0; li < leaguesCache.length; li++) {
+        if (leaguesCache[li].id === leagueId) { league = leaguesCache[li]; break; }
+      }
+    }
+    var headerEl = el('league-detail-header');
+    if (headerEl && league) {
+      var flag = COUNTRY_FLAGS[league.country] || '';
+      headerEl.innerHTML =
+        (league.logo_url ? '<img class="league-detail-logo" src="' + esc(league.logo_url) + '" alt="">' :
+         (flag ? '<span style="font-size:28px">' + flag + '</span>' : '')) +
+        '<div><div class="league-detail-name">' + esc(league.name) + '</div>' +
+        '<div class="league-detail-country">' + esc(league.country || '') + '</div></div>';
+    }
+
+    // Show loading
+    var lgStBody = el('lg-standings-body');
+    var lgMatchFeed = el('lg-match-feed');
+    if (lgStBody) lgStBody.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px">Загрузка...</div>';
+    if (lgMatchFeed) lgMatchFeed.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px">Загрузка...</div>';
+
+    Promise.all([
+      api('/standings', { league_id: leagueId }),
+      api('/matches', { league_id: leagueId, days_ahead: 14, limit: 50 }),
+      api('/results', { league_id: leagueId, days: 90, limit: 200 }),
+      api('/news', { limit: 30 }),
+    ]).then(function (results) {
+      renderLeagueStandings(results[0].data);
+      renderLeaguePredictions(results[1].data || []);
+
+      var leagueResults = results[2].data || [];
+      renderLeagueStats(leagueResults);
+      renderLeagueMarketBreakdown(leagueResults);
+
+      var allNews = (results[3].data && results[3].data.items) || [];
+      var leagueNews = allNews.filter(function (n) { return n.league_id === leagueId; });
+      renderLeagueNews(leagueNews);
+    }).catch(function (e) {
+      if (!_isAbort(e)) console.error('loadLeagueDetail error', e);
+    });
+  }
+
+  function renderLeagueStandings(data) {
+    var body = el('lg-standings-body');
+    if (!body) return;
+    if (!data || !data.length) { body.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">\u041D\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445</div>'; return; }
+
+    var html = '<table class="rs-standings-table"><thead><tr><th>#</th><th>\u041A\u043B\u0443\u0431</th><th>\u0418</th><th>\u0417</th><th>\u041F\u0440</th><th>\u0420\u0413</th><th>\u041E</th><th>\u0424\u043E\u0440\u043C\u0430</th></tr></thead><tbody>';
+    data.forEach(function (r) {
+      var formDots = (r.form || '').split('').map(function (ch) {
+        var cls = ch === 'W' ? 'rs-form-w' : ch === 'D' ? 'rs-form-d' : ch === 'L' ? 'rs-form-l' : '';
+        return '<span class="rs-form-dot ' + cls + '"></span>';
+      }).join('');
+      var gd = r.goal_diff != null ? r.goal_diff : ((r.goals_for || 0) - (r.goals_against || 0));
+      var gdStr = gd > 0 ? '+' + gd : String(gd);
+      html += '<tr>';
+      html += '<td>' + (r.rank || '') + '</td>';
+      html += '<td><div class="rs-standings-club">' + logoImg(r.team_logo_url, r.team_name, 14) + '<span>' + esc(r.team_name || '') + '</span></div></td>';
+      html += '<td>' + (r.played || 0) + '</td>';
+      html += '<td>' + (r.goals_for || 0) + '</td>';
+      html += '<td>' + (r.goals_against || 0) + '</td>';
+      html += '<td style="color:' + (gd > 0 ? 'var(--green)' : gd < 0 ? 'var(--negative)' : 'var(--text-2)') + '">' + gdStr + '</td>';
+      html += '<td class="rs-standings-pts">' + (r.points || 0) + '</td>';
+      html += '<td><div class="rs-form-wrap">' + formDots + '</div></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    body.innerHTML = html;
+  }
+
+  function renderLeaguePredictions(predictions) {
+    var feed = el('lg-match-feed');
+    var countEl = el('lg-pred-count');
+    if (!feed) return;
+
+    if (!predictions.length) {
+      feed.innerHTML = emptyHtml('\u26BD', '\u041D\u0435\u0442 \u043F\u0440\u043E\u0433\u043D\u043E\u0437\u043E\u0432', '\u041D\u0430 \u0431\u043B\u0438\u0436\u0430\u0439\u0448\u0438\u0435 \u0434\u043D\u0438 \u043F\u0440\u043E\u0433\u043D\u043E\u0437\u043E\u0432 \u043D\u0435\u0442');
+      if (countEl) countEl.textContent = '0';
+      return;
+    }
+
+    var fixtureData = groupByFixture(predictions);
+    if (countEl) {
+      var mc = fixtureData.order.length;
+      countEl.textContent = mc + ' \u043C\u0430\u0442\u0447' + (mc === 1 ? '' : mc < 5 ? '\u0430' : '\u0435\u0439');
+    }
+
+    var html = '';
+    fixtureData.order.forEach(function (fid) {
+      html += renderMatchRow(fixtureData.groups[fid][0], fixtureData.groups[fid]);
+    });
+    feed.innerHTML = html;
+  }
+
+  function renderLeagueStats(results) {
+    var container = el('lg-stats-grid');
+    if (!container) return;
+    if (!results || !results.length) {
+      container.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">\u041D\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445</div>';
+      return;
+    }
+    var total = results.length;
+    var wins = results.filter(function (r) { return r.status === 'WIN'; }).length;
+    var profit = results.reduce(function (sum, r) { return sum + (r.profit || 0); }, 0);
+    var roi = total > 0 ? (profit / total) * 100 : 0;
+    var wr = total > 0 ? (wins / total) * 100 : 0;
+
+    var roiCls = roi > 0 ? 'accent' : roi < 0 ? 'negative' : '';
+    var profitCls = profit > 0 ? 'green' : profit < 0 ? 'negative' : '';
+
+    container.innerHTML =
+      '<div class="an-stat"><div class="an-stat-label">ROI</div><div class="an-stat-value ' + roiCls + '">' + (roi >= 0 ? '+' : '') + roi.toFixed(1) + '%</div></div>' +
+      '<div class="an-stat"><div class="an-stat-label">Win Rate</div><div class="an-stat-value blue">' + wr.toFixed(1) + '%</div></div>' +
+      '<div class="an-stat"><div class="an-stat-label">\u0421\u0442\u0430\u0432\u043E\u043A</div><div class="an-stat-value">' + total + '</div></div>' +
+      '<div class="an-stat"><div class="an-stat-label">\u041F\u0440\u043E\u0444\u0438\u0442</div><div class="an-stat-value ' + profitCls + '">' + (profit >= 0 ? '+' : '') + profit.toFixed(1) + '</div></div>';
+  }
+
+  function renderLeagueMarketBreakdown(results) {
+    var cont = el('lg-market-breakdown-body');
+    if (!cont) return;
+    if (!results || !results.length) {
+      cont.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">\u041D\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445</div>';
+      return;
+    }
+
+    var markets = {};
+    results.forEach(function (r) {
+      var mkt = r.market || '1X2';
+      if (!markets[mkt]) markets[mkt] = { settled: 0, wins: 0, profit: 0 };
+      markets[mkt].settled++;
+      if (r.status === 'WIN') markets[mkt].wins++;
+      markets[mkt].profit += (r.profit || 0);
+    });
+
+    var keys = MARKET_ORDER.filter(function (k) { return markets[k] && markets[k].settled > 0; });
+    if (!keys.length) {
+      cont.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">\u041D\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445</div>';
+      return;
+    }
+
+    var html = '<table class="lg-market-table"><thead><tr><th>\u0420\u044B\u043D\u043E\u043A</th><th>\u0421\u0442\u0430\u0432\u043E\u043A</th><th>Win%</th><th>ROI</th><th>\u041F\u0440\u043E\u0444\u0438\u0442</th></tr></thead><tbody>';
+    keys.forEach(function (mkt) {
+      var v = markets[mkt];
+      var wr = v.settled > 0 ? (v.wins / v.settled * 100) : 0;
+      var roi = v.settled > 0 ? (v.profit / v.settled * 100) : 0;
+      var label = MARKET_LABELS[mkt] || mkt;
+      var roiCls = roi >= 0 ? 'green' : 'negative';
+      var profitCls = v.profit >= 0 ? 'green' : 'negative';
+      html += '<tr><td><strong>' + esc(label) + '</strong></td>';
+      html += '<td>' + v.settled + '</td>';
+      html += '<td>' + wr.toFixed(1) + '%</td>';
+      html += '<td style="color:var(--' + roiCls + ')">' + (roi >= 0 ? '+' : '') + roi.toFixed(1) + '%</td>';
+      html += '<td style="color:var(--' + profitCls + ')">' + (v.profit >= 0 ? '+' : '') + v.profit.toFixed(1) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    cont.innerHTML = html;
+  }
+
+  function renderLeagueNews(articles) {
+    var container = el('lg-news-list');
+    if (!container) return;
+    if (!articles || !articles.length) {
+      container.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">\u041D\u0435\u0442 \u043D\u043E\u0432\u043E\u0441\u0442\u0435\u0439 \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u043B\u0438\u0433\u0438</div>';
+      return;
+    }
+    var html = '';
+    articles.forEach(function (a) {
+      var cat = NEWS_CAT[a.category] || NEWS_CAT.standings;
+      html += '<button class="nw-item" data-cat="' + esc(a.category || 'standings') + '" data-news-id="' + a.id + '" style="width:100%">';
+      html += '<div class="nw-cat">' + cat.emoji + ' ' + esc(cat.label) + '</div>';
+      html += '<div class="nw-title">' + esc(a.title) + '</div>';
+      html += '<div class="nw-time">' + timeAgo(a.published_at) + '</div>';
+      html += '</button>';
+    });
+    container.innerHTML = html;
   }
 
   // ═══ NAVIGATION ═══
@@ -1210,6 +1534,7 @@
     if (view === 'predictions') loadPredictions();
     else if (view === 'results') loadResults();
     else if (view === 'analytics') loadAnalytics();
+    else if (view === 'leagues') loadLeaguePage();
   }
 
   // ═══ EVENT HANDLING ═══
@@ -1276,71 +1601,50 @@
     }
 
     // Top Value item click — navigate to match in predictions
-    var topItem = target.closest('.rs-top-item[data-match-key]');
+    var topItem = target.closest('.sb-top-item[data-match-key]');
     if (topItem) {
       var topKey = topItem.dataset.matchKey;
-      // Switch to predictions view, reset filters, expand target match
       if (currentView !== 'predictions') { navigate('predictions'); }
       marketFilter = 'all';
       selectedDate = 'today';
-      activeLeague = null;
       expandedMatch = topKey;
       renderDateSlider();
       renderPills();
       renderMatchFeed();
-      // Scroll to the expanded row
       setTimeout(function () {
-        var row = document.querySelector('.match-row[data-match-key="' + topKey + '"]');
+        var row = document.querySelector('.match-card[data-match-key="' + topKey + '"]');
         if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 100);
       return;
     }
 
-    var matchRow = target.closest('.match-row');
-    if (matchRow && !target.closest('.sb-star') && !target.closest('.sb-league')) {
-      var key = matchRow.dataset.matchKey;
+    // League pill click on Leagues page
+    var leaguePill = target.closest('[data-league-pill]');
+    if (leaguePill) {
+      var lid = parseInt(leaguePill.dataset.leaguePill, 10);
+      if (lid && lid !== selectedLeague) loadLeagueDetail(lid);
+      return;
+    }
+
+    var matchCard = target.closest('.match-card');
+    if (matchCard) {
+      var key = matchCard.dataset.matchKey;
       if (expandedMatch === key) {
         expandedMatch = null;
       } else {
         expandedMatch = key;
       }
       renderMatchFeed();
-      return;
-    }
-
-    // Favorite toggle — must be before sbLeague
-    var favBtn = target.closest('.sb-star, [data-fav]');
-    if (favBtn) {
-      e.stopPropagation();
-      var favId = parseInt(favBtn.dataset.fav, 10);
-      var idx = favLeagues.indexOf(favId);
-      if (idx >= 0) favLeagues.splice(idx, 1);
-      else favLeagues.push(favId);
-      _store('fav_leagues', favLeagues);
-      renderSidebar();
-      toast(idx >= 0 ? 'Убрано из избранного' : 'Добавлено в избранное', 'success');
-      return;
-    }
-
-    var sbLeague = target.closest('.sb-league');
-    if (sbLeague) {
-      var leagueId = parseInt(sbLeague.dataset.leagueId, 10);
-      activeLeague = activeLeague === leagueId ? null : leagueId;
-      // FIX 2: Reset market filter on league switch
-      marketFilter = 'all';
-      renderPills();
-      if (currentView === 'predictions') {
-        loadPredictions();
-      } else if (currentView === 'results') {
-        loadResults();
+      // Also re-render league predictions if on leagues page
+      if (currentView === 'leagues' && selectedLeague) {
+        var lgFeed = el('lg-match-feed');
+        if (lgFeed) {
+          var rows = lgFeed.querySelectorAll('.match-card');
+          for (var ri = 0; ri < rows.length; ri++) {
+            rows[ri].classList.toggle('expanded', rows[ri].dataset.matchKey === expandedMatch);
+          }
+        }
       }
-      // FIX 1: Sync standings with selected league
-      if (activeLeague) {
-        loadStandings(activeLeague);
-        var stSel = el('rs-league-select');
-        if (stSel) stSel.value = activeLeague;
-      }
-      renderSidebar();
       return;
     }
 
@@ -1371,13 +1675,6 @@
       return;
     }
 
-    // Standings toggle
-    if (target.id === 'standings-toggle' || target.closest('#standings-toggle')) {
-      standingsExpanded = !standingsExpanded;
-      if (_standingsFullData) renderStandingsMini(_standingsFullData);
-      return;
-    }
-
     var chartDl = target.closest('[data-chart]');
     if (chartDl) { _downloadChart(chartDl.dataset.chart); return; }
 
@@ -1392,6 +1689,23 @@
       if (action === 'predictions') loadPredictions();
       else if (action === 'results') loadResults();
       else if (action === 'analytics') loadAnalytics();
+      return;
+    }
+
+    // News sidebar items
+    var newsItem = target.closest('.nw-item[data-news-id]');
+    if (newsItem) {
+      showNewsModal(parseInt(newsItem.dataset.newsId, 10));
+      return;
+    }
+    if (target.id === 'nw-show-more' || target.closest('#nw-show-more')) {
+      newsShowAll = true;
+      renderNews();
+      return;
+    }
+    if (target.id === 'news-close' || target.closest('#news-close')) {
+      var newsModal = el('news-modal');
+      if (newsModal) newsModal.style.display = 'none';
       return;
     }
 
@@ -1420,6 +1734,11 @@
   // Keyboard
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
+      var newsModal = el('news-modal');
+      if (newsModal && newsModal.style.display !== 'none') {
+        newsModal.style.display = 'none';
+        return;
+      }
       var aboutModal = el('about-modal');
       if (aboutModal && aboutModal.style.display !== 'none') {
         aboutModal.style.display = 'none';
@@ -1428,20 +1747,12 @@
     }
     if (e.key === 'Enter' || e.key === ' ') {
       var t = e.target;
-      if (t.classList.contains('league-header') || t.classList.contains('match-row')) {
+      if (t.classList.contains('league-header') || t.classList.contains('match-card')) {
         e.preventDefault();
         t.click();
       }
     }
   });
-
-  // Standings league select
-  var standingsSelect = el('rs-league-select');
-  if (standingsSelect) {
-    standingsSelect.addEventListener('change', function () {
-      if (standingsSelect.value) loadStandings(standingsSelect.value);
-    });
-  }
 
   // Resize charts
   var resizeTimer;
