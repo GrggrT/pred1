@@ -590,6 +590,10 @@ async def save_news_article(
     sources: list[str],
     league_id: int | None = None,
     status: str = "published",
+    meta_description: str | None = None,
+    tags: list[str] | None = None,
+    reading_time: int | None = None,
+    word_count: int | None = None,
 ) -> int:
     """Insert a news article and return id."""
     import json
@@ -600,11 +604,14 @@ async def save_news_article(
         text("""
             INSERT INTO news_articles
                 (title, slug, body, summary, category, sources, league_id,
-                 status, published_at)
+                 status, published_at,
+                 meta_description, tags, reading_time, word_count, author)
             VALUES
                 (:title, :slug, :body, :summary, :category,
                  CAST(:sources AS jsonb), :league_id, :status,
-                 CASE WHEN :is_published THEN now() ELSE NULL END)
+                 CASE WHEN :is_published THEN now() ELSE NULL END,
+                 :meta_description, CAST(:tags AS jsonb), :reading_time, :word_count,
+                 'FVB AI Analytics')
             RETURNING id
         """),
         {
@@ -617,11 +624,15 @@ async def save_news_article(
             "league_id": league_id,
             "status": status,
             "is_published": is_published,
+            "meta_description": meta_description,
+            "tags": json.dumps(tags or []),
+            "reading_time": reading_time,
+            "word_count": word_count,
         },
     )
     await session.commit()
     article_id = result.scalar()
-    log.info("news_article_saved title=%s category=%s id=%s", title[:50], category, article_id)
+    log.info("news_article_saved title=%s category=%s id=%s words=%s", title[:50], category, article_id, word_count)
     return article_id
 
 

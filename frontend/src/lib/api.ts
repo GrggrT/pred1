@@ -40,6 +40,22 @@ export interface NewsArticle {
   sources: any[];
   published_at: string | null;
   created_at?: string | null;
+  meta_description?: string | null;
+  tags?: string[] | null;
+  reading_time?: number | null;
+  word_count?: number | null;
+  author?: string | null;
+  image_url?: string | null;
+}
+
+export interface RelatedArticle {
+  id: number;
+  title: string;
+  slug: string;
+  summary: string | null;
+  category: string;
+  published_at: string | null;
+  reading_time?: number | null;
 }
 
 export interface NewsSlug {
@@ -191,6 +207,10 @@ export async function fetchNewsBySlug(slug: string): Promise<NewsArticle> {
 
 export async function fetchNewsSlugs(): Promise<NewsSlug[]> {
   return apiFetch<NewsSlug[]>('/news/slugs', 300);
+}
+
+export async function fetchRelatedNews(slug: string): Promise<RelatedArticle[]> {
+  return apiFetch<RelatedArticle[]>(`/news/${slug}/related`, 600);
 }
 
 export async function fetchMatches(params?: {

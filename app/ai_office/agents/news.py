@@ -306,7 +306,7 @@ async def _generate_article(
     prompt = (
         f"Источник: {source.get('source_name', 'Unknown')}\n"
         f"Заголовок: {title}\n"
-        f"Описание: {desc[:500]}\n"
+        f"Описание: {desc[:1500]}\n"
     )
 
     try:
@@ -315,7 +315,7 @@ async def _generate_article(
             prompt,
             system_prompt=NEWS_WRITER_PROMPT,
             temperature=0.3,
-            max_tokens=512,
+            max_tokens=2048,
             use_cache=False,
         )
         cleaned = raw.strip()
@@ -340,6 +340,21 @@ async def _generate_article(
         valid_categories = {"preview", "review", "injury", "transfer", "standings"}
         if article["category"] not in valid_categories:
             article["category"] = "standings"  # safe default
+
+        # Calculate word_count from body (strip HTML tags)
+        import re as _re
+        body_text = _re.sub(r"<[^>]+>", " ", article.get("body", ""))
+        article["word_count"] = len(body_text.split())
+
+        # Ensure tags is a list
+        if not isinstance(article.get("tags"), list):
+            article["tags"] = []
+
+        # Ensure reading_time is int
+        try:
+            article["reading_time"] = int(article.get("reading_time", 0)) or max(1, article["word_count"] // 200)
+        except (TypeError, ValueError):
+            article["reading_time"] = max(1, article["word_count"] // 200)
 
         return article
     except Exception:
@@ -526,6 +541,10 @@ async def run(session: AsyncSession) -> dict[str, Any]:
                     sources=[source["url"]],
                     league_id=league_id,
                     status="draft",  # published after Telegram send
+                    meta_description=article_data.get("meta_description"),
+                    tags=article_data.get("tags"),
+                    reading_time=article_data.get("reading_time"),
+                    word_count=article_data.get("word_count"),
                 )
                 await mark_sources_processed(session, [source["id"]], article_id)
                 article_data["_article_id"] = article_id

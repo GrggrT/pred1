@@ -5002,7 +5002,8 @@ async def public_news(
     res = await session.execute(
         text(f"""
             SELECT id, title, slug, summary, body, category,
-                   league_id, sources, published_at
+                   league_id, sources, published_at,
+                   meta_description, tags, reading_time, word_count, author
             FROM news_articles
             WHERE status = 'published'
               {where_cat}
@@ -5024,6 +5025,11 @@ async def public_news(
                 "league_id": r.league_id,
                 "sources": r.sources,
                 "published_at": r.published_at.isoformat() if r.published_at else None,
+                "meta_description": r.meta_description,
+                "tags": r.tags or [],
+                "reading_time": r.reading_time,
+                "word_count": r.word_count,
+                "author": r.author or "FVB AI Analytics",
             }
             for r in res.fetchall()
         ]
@@ -5069,7 +5075,8 @@ async def public_news_by_slug(
         text("""
             SELECT id, title, slug, summary, body, category,
                    league_id, fixture_id, home_team_name, away_team_name,
-                   sources, published_at, created_at
+                   sources, published_at, created_at,
+                   meta_description, tags, reading_time, word_count, author
             FROM news_articles
             WHERE slug = :slug AND status = 'published'
             LIMIT 1
@@ -5094,7 +5101,63 @@ async def public_news_by_slug(
         "sources": row.sources,
         "published_at": row.published_at.isoformat() if row.published_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
+        "meta_description": row.meta_description,
+        "tags": row.tags or [],
+        "reading_time": row.reading_time,
+        "word_count": row.word_count,
+        "author": row.author or "FVB AI Analytics",
     }
+
+
+@app.get("/api/public/v1/news/{slug}/related")
+async def public_news_related(
+    slug: str,
+    _rate: None = Depends(_check_public_rate),
+    *,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    """Related news articles — same league or category."""
+    # First get the current article
+    cur = await session.execute(
+        text("""
+            SELECT id, league_id, category FROM news_articles
+            WHERE slug = :slug AND status = 'published' LIMIT 1
+        """),
+        {"slug": slug},
+    )
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    res = await session.execute(
+        text("""
+            SELECT id, title, slug, summary, category, published_at, reading_time
+            FROM news_articles
+            WHERE status = 'published' AND id != :current_id
+              AND (league_id = :league_id OR category = :category)
+            ORDER BY
+              CASE WHEN league_id = :league_id AND category = :category THEN 0
+                   WHEN league_id = :league_id THEN 1
+                   ELSE 2 END,
+              published_at DESC
+            LIMIT 5
+        """),
+        {"current_id": row.id, "league_id": row.league_id, "category": row.category},
+    )
+    response.headers["Cache-Control"] = "public, max-age=600"
+    return [
+        {
+            "id": r.id,
+            "title": r.title,
+            "slug": r.slug,
+            "summary": r.summary,
+            "category": r.category,
+            "published_at": r.published_at.isoformat() if r.published_at else None,
+            "reading_time": r.reading_time,
+        }
+        for r in res.fetchall()
+    ]
 
 
 @app.get("/api/public/v1/leagues/{slug}")

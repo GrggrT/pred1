@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
-import { fetchNewsBySlug, fetchNewsSlugs, fetchLeagues } from '@/lib/api';
+import { fetchNewsBySlug, fetchNewsSlugs, fetchLeagues, fetchRelatedNews } from '@/lib/api';
 import { Link } from '@/i18n/navigation';
 import { Breadcrumbs } from '@/components/seo/Breadcrumbs';
 import { JsonLd, newsArticleJsonLd, breadcrumbJsonLd } from '@/components/seo/JsonLd';
@@ -9,6 +9,31 @@ import { locales } from '@/i18n/config';
 import styles from './page.module.css';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://footballvaluebets.com';
+
+const CAT_LABELS: Record<string, string> = {
+  preview: 'Preview',
+  review: 'Review',
+  injury: 'Injury',
+  transfer: 'Transfer',
+  standings: 'Standings',
+};
+
+function ensureHtml(body: string): string {
+  if (/<[a-z][\s\S]*>/i.test(body)) return body;
+  return body
+    .split('\n')
+    .filter(Boolean)
+    .map((p) => `<p>${p}</p>`)
+    .join('');
+}
+
+function extractDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace('www.', '');
+  } catch {
+    return url;
+  }
+}
 
 export async function generateStaticParams() {
   try {
@@ -39,9 +64,12 @@ export async function generateMetadata({
       alternates[loc] = `/${loc}/news/${slug}`;
     }
 
+    const description = article.meta_description || article.summary || article.title;
+
     return {
       title: article.title,
-      description: article.summary || article.title,
+      description,
+      keywords: article.tags?.join(', ') || undefined,
       alternates: {
         canonical: `/${locale}/news/${slug}`,
         languages: alternates,
@@ -49,8 +77,14 @@ export async function generateMetadata({
       openGraph: {
         type: 'article',
         title: article.title,
-        description: article.summary || article.title,
+        description,
         publishedTime: article.published_at || undefined,
+        authors: [article.author || 'FVB AI Analytics'],
+        tags: article.tags || undefined,
+        section: CAT_LABELS[article.category] || article.category,
+        images: article.image_url
+          ? [{ url: article.image_url }]
+          : [{ url: `${SITE_URL}/og-default.png`, width: 1200, height: 630 }],
       },
     };
   } catch {
@@ -76,16 +110,26 @@ export default async function NewsArticlePage({
   const t = await getTranslations({ locale, namespace: 'meta' });
   const tc = await getTranslations({ locale, namespace: 'common' });
 
-  // Find league for internal linking
+  // Parallel fetches: league + related articles
   let leagueLink: { name: string; slug: string } | null = null;
-  if (article.league_id) {
-    try {
-      const leagues = await fetchLeagues();
-      const match = leagues.find((l) => l.id === article.league_id);
-      if (match?.slug) {
-        leagueLink = { name: match.name, slug: match.slug };
-      }
-    } catch { /* ignore */ }
+  let related: Awaited<ReturnType<typeof fetchRelatedNews>> = [];
+
+  const [leagueResult, relatedResult] = await Promise.allSettled([
+    article.league_id
+      ? fetchLeagues().then((leagues) => {
+          const match = leagues.find((l) => l.id === article.league_id);
+          if (match?.slug) return { name: match.name, slug: match.slug };
+          return null;
+        })
+      : Promise.resolve(null),
+    fetchRelatedNews(slug),
+  ]);
+
+  if (leagueResult.status === 'fulfilled' && leagueResult.value) {
+    leagueLink = leagueResult.value;
+  }
+  if (relatedResult.status === 'fulfilled') {
+    related = relatedResult.value;
   }
 
   const breadcrumbs = [
@@ -102,28 +146,42 @@ export default async function NewsArticlePage({
       })
     : null;
 
+  const authorName = article.author || 'FVB AI Analytics';
+
   return (
     <>
       <JsonLd data={newsArticleJsonLd(article, locale, SITE_URL)} />
       <JsonLd data={breadcrumbJsonLd(breadcrumbs)} />
 
       <article className={styles.container}>
-        <Breadcrumbs items={[
-          { label: tc('home'), href: '/' },
-          { label: t('newsTitle'), href: '/news' },
-          { label: article.title },
-        ]} />
+        <Breadcrumbs
+          items={[
+            { label: tc('home'), href: '/' },
+            { label: t('newsTitle'), href: '/news' },
+            { label: article.title },
+          ]}
+        />
 
         <header className={styles.header}>
-          <span className={styles.category}>{article.category}</span>
+          <span className={styles.category}>
+            {CAT_LABELS[article.category] || article.category}
+          </span>
           {publishedDate && <time className={styles.date}>{publishedDate}</time>}
         </header>
 
         <h1 className={styles.title}>{article.title}</h1>
 
-        {article.summary && (
-          <p className={styles.summary}>{article.summary}</p>
-        )}
+        {/* Author byline + reading time */}
+        <div className={styles.authorLine}>
+          <span className={styles.authorName}>{authorName}</span>
+          {article.reading_time && (
+            <span className={styles.readingTime}>
+              {article.reading_time} min read
+            </span>
+          )}
+        </div>
+
+        {article.summary && <p className={styles.summary}>{article.summary}</p>}
 
         {/* Teams context if match-related */}
         {article.home_team_name && article.away_team_name && (
@@ -136,13 +194,83 @@ export default async function NewsArticlePage({
 
         <div
           className={styles.body}
-          dangerouslySetInnerHTML={{ __html: article.body }}
+          dangerouslySetInnerHTML={{ __html: ensureHtml(article.body) }}
         />
 
+        {/* Tags */}
+        {article.tags && article.tags.length > 0 && (
+          <div className={styles.tags}>
+            {article.tags.map((tag) => (
+              <span key={tag} className={styles.tag}>
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* League link */}
         {leagueLink && (
           <Link href={`/leagues/${leagueLink.slug}`} className={styles.leagueLink}>
-            {leagueLink.name} →
+            {leagueLink.name} &rarr;
           </Link>
+        )}
+
+        {/* Sources */}
+        {article.sources && article.sources.length > 0 && (
+          <aside className={styles.sources}>
+            <h3 className={styles.sourcesTitle}>Sources</h3>
+            <ul className={styles.sourcesList}>
+              {article.sources.map((src: string, i: number) => (
+                <li key={i}>
+                  <a
+                    href={src}
+                    rel="noopener noreferrer nofollow"
+                    target="_blank"
+                    className={styles.sourceLink}
+                  >
+                    {extractDomain(src)}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        )}
+
+        {/* Related articles */}
+        {related.length > 0 && (
+          <section className={styles.related}>
+            <h2 className={styles.relatedTitle}>Related articles</h2>
+            <div className={styles.relatedGrid}>
+              {related.map((r) => (
+                <Link
+                  key={r.id}
+                  href={`/news/${r.slug}`}
+                  className={styles.relatedCard}
+                >
+                  <span className={styles.relatedCategory}>
+                    {CAT_LABELS[r.category] || r.category}
+                  </span>
+                  <h3 className={styles.relatedCardTitle}>{r.title}</h3>
+                  {r.summary && (
+                    <p className={styles.relatedSummary}>
+                      {r.summary.length > 120
+                        ? r.summary.slice(0, 120) + '...'
+                        : r.summary}
+                    </p>
+                  )}
+                  <span className={styles.relatedMeta}>
+                    {r.published_at
+                      ? new Date(r.published_at).toLocaleDateString(locale, {
+                          month: 'short',
+                          day: 'numeric',
+                        })
+                      : ''}
+                    {r.reading_time ? ` · ${r.reading_time} min` : ''}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
         )}
       </article>
     </>
