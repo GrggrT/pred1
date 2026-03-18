@@ -1,0 +1,34 @@
+.nav {
+  padding: 12px 0;
+}
+
+.list {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  list-style: none;
+  font-size: var(--font-size-xs);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+}
+
+.sep {
+  margin: 0 6px;
+  color: var(--muted);
+}
+
+.link {
+  color: var(--text-2);
+  transition: color 0.15s;
+}
+
+.link:hover {
+  color: var(--accent);
+}
+
+.current {
+  color: var(--muted);
+}

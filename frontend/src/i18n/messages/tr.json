@@ -1,0 +1,112 @@
+{
+  "meta": {
+    "siteName": "Football Value Bets",
+    "siteDescription": "Yapay zeka destekli futbol tahminleri. İstatistiksel modeller ve makine öğrenimine dayalı doğru öngörüler.",
+    "homeTitle": "Futbol Tahminleri — Yapay Zeka Modelleri ve Analiz",
+    "newsTitle": "Futbol Haberleri",
+    "newsDescription": "Son futbol haberleri: maç incelemeleri, transferler, sakatlıklar ve analizler",
+    "leaguesTitle": "Futbol Ligleri",
+    "leaguesDescription": "Futbol ligleri için istatistikler, puan durumu ve tahminler",
+    "aboutTitle": "Hakkında — Football Value Bets",
+    "aboutDescription": "Yapay zeka futbol tahmin sistemimiz nasıl çalışır: Dixon-Coles modeli, ELO derecelendirmeleri ve stacking meta-modeli"
+  },
+  "nav": {
+    "home": "Tahminler",
+    "news": "Haberler",
+    "leagues": "Ligler",
+    "about": "Hakkında"
+  },
+  "common": {
+    "predictions": "Tahminler",
+    "results": "Sonuçlar",
+    "analytics": "Analiz",
+    "standings": "Puan Durumu",
+    "allLeagues": "Tüm ligler",
+    "readMore": "Devamını oku",
+    "backToNews": "Tüm haberler",
+    "backToLeagues": "Tüm ligler",
+    "home": "Ana Sayfa",
+    "noData": "Veri yok",
+    "loading": "Yükleniyor...",
+    "vs": "vs"
+  },
+  "home": {
+    "heroTitle": "Yapay Zeka Futbol Tahminleri",
+    "heroSubtitle": "Doğru öngörüler için istatistiksel modeller + makine öğrenimi",
+    "todayMatches": "Yaklaşan maçlar",
+    "topValue": "En iyi değer",
+    "latestNews": "Son haberler",
+    "trackRecord": "Geçmiş performans",
+    "marketStats": "Pazar istatistikleri",
+    "leagues": "Ligler"
+  },
+  "match": {
+    "probability": "Olasılık",
+    "prediction": "Tahmin",
+    "coefficient": "Oran",
+    "ev": "EV",
+    "homeWin": "Ev sahibi",
+    "draw": "Beraberlik",
+    "awayWin": "Deplasman",
+    "over": "Üst",
+    "under": "Alt",
+    "btts": "BTTS",
+    "dch": "Çifte şans"
+  },
+  "stats": {
+    "wins": "Kazanma",
+    "roi": "ROI",
+    "profit": "Kâr",
+    "total": "Toplam",
+    "winRate": "Kazanma oranı"
+  },
+  "standings": {
+    "position": "#",
+    "team": "Takım",
+    "played": "O",
+    "won": "G",
+    "drawn": "B",
+    "lost": "M",
+    "goalsFor": "AG",
+    "goalsAgainst": "YG",
+    "goalDiff": "A",
+    "points": "P",
+    "form": "Form"
+  },
+  "news": {
+    "categories": {
+      "preview": "Maç önü",
+      "review": "Maç değerlendirmesi",
+      "injury": "Sakatlıklar",
+      "transfer": "Transferler",
+      "standings": "Puan durumu"
+    }
+  },
+  "about": {
+    "heading": "Football Value Bets Hakkında",
+    "intro": "FVB, büyük Avrupa liglerinde değerli bahisler bulmak için istatistiksel modeller ve makine öğrenimi kullanan yapay zeka destekli bir futbol tahmin platformudur.",
+    "howItWorksTitle": "Tahminler nasıl çalışır",
+    "step1Name": "Veri toplama",
+    "step1Desc": "Profesyonel kaynaklardan maçlar, oranlar, puan durumu ve sakatlıklar",
+    "step2Name": "İndeks hesaplama",
+    "step2Desc": "ELO derecelendirmeleri, form metrikleri, hareketli xG ortalamaları",
+    "step3Name": "Model ayarlama",
+    "step3Desc": "Dixon-Coles olasılık modeli çift modda: goller ve xG",
+    "step4Name": "Tahminler",
+    "step4Desc": "Stacking meta-modeli sinyalleri nihai olasılıklara dönüştürür",
+    "step5Name": "Değer tespiti",
+    "step5Desc": "Model olasılıklarının bahis oranlarıyla karşılaştırılması",
+    "step6Name": "Değerlendirme",
+    "step6Desc": "Her tahminin takibi, ROI ve kalibrasyon hesaplama",
+    "leaguesTitle": "Kapsanan ligler",
+    "leaguesText": "Premier League, La Liga, Serie A, Bundesliga, Ligue 1 ve Primeira Liga.",
+    "technologyTitle": "Teknoloji",
+    "technologyText": "Python, FastAPI ve PostgreSQL ile geliştirilmiştir. Dixon-Coles olasılık modeli, ev sahibi avantajı ayarlı ELO derecelendirme sistemi ve nihai tahminler için stacking ensemble. Tüm veriler her gün otomatik olarak işlenir.",
+    "disclaimerTitle": "Sorumluluk reddi",
+    "disclaimerText": "Tüm bilgiler yalnızca eğitim ve eğlence amaçlıdır. Geçmiş performans gelecekteki sonuçları garanti etmez. Tahminlerimize dayanarak alınan mali kararlardan sorumlu değiliz."
+  },
+  "footer": {
+    "disclaimer": "Bilgiler yalnızca eğitim amaçlıdır. Mali kararlardan sorumlu değiliz.",
+    "copyright": "© {year} Football Value Bets"
+  }
+}

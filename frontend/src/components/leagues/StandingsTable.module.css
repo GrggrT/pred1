@@ -1,0 +1,109 @@
+.wrapper {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.table th {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 8px 6px;
+  text-align: center;
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 8px 6px;
+  text-align: center;
+  color: var(--text-2);
+  border-bottom: 1px solid rgba(36, 42, 72, 0.15);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.pos {
+  width: 30px;
+  text-align: center !important;
+}
+
+.team {
+  text-align: left !important;
+  min-width: 120px;
+}
+
+.table td.team {
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.teamCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo {
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.pts {
+  font-weight: 700 !important;
+  color: var(--text) !important;
+}
+
+.positive {
+  color: var(--green) !important;
+}
+
+.negative {
+  color: var(--red) !important;
+}
+
+.formCol {
+  min-width: 80px;
+}
+
+.formDots {
+  display: flex;
+  gap: 3px;
+  justify-content: center;
+}
+
+.formDot {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: white;
+}
+
+.win {
+  background: rgba(34, 197, 94, 0.25);
+  color: var(--green);
+}
+
+.drawDot {
+  background: rgba(100, 116, 139, 0.25);
+  color: var(--text-2);
+}
+
+.loss {
+  background: rgba(239, 68, 68, 0.25);
+  color: var(--red);
+}

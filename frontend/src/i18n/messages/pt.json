@@ -1,0 +1,112 @@
+{
+  "meta": {
+    "siteName": "Football Value Bets",
+    "siteDescription": "Previsões de futebol com IA. Prognósticos precisos baseados em modelos estatísticos e aprendizado de máquina.",
+    "homeTitle": "Previsões de Futebol — Modelos de IA & Análises",
+    "newsTitle": "Notícias de Futebol",
+    "newsDescription": "Últimas notícias de futebol: análises de jogos, transferências, lesões e estatísticas",
+    "leaguesTitle": "Ligas de Futebol",
+    "leaguesDescription": "Estatísticas, classificações e previsões para ligas de futebol",
+    "aboutTitle": "Sobre — Football Value Bets",
+    "aboutDescription": "Como funciona o nosso sistema de previsão de futebol com IA: modelo Dixon-Coles, ratings ELO e meta-modelo de stacking"
+  },
+  "nav": {
+    "home": "Previsões",
+    "news": "Notícias",
+    "leagues": "Ligas",
+    "about": "Sobre"
+  },
+  "common": {
+    "predictions": "Previsões",
+    "results": "Resultados",
+    "analytics": "Análises",
+    "standings": "Classificação",
+    "allLeagues": "Todas as ligas",
+    "readMore": "Leia mais",
+    "backToNews": "Todas as notícias",
+    "backToLeagues": "Todas as ligas",
+    "home": "Início",
+    "noData": "Sem dados",
+    "loading": "Carregando...",
+    "vs": "vs"
+  },
+  "home": {
+    "heroTitle": "Previsões de Futebol com IA",
+    "heroSubtitle": "Modelos estatísticos + aprendizado de máquina para prognósticos precisos",
+    "todayMatches": "Próximos jogos",
+    "topValue": "Melhor valor",
+    "latestNews": "Últimas notícias",
+    "trackRecord": "Histórico",
+    "marketStats": "Estatísticas por mercado",
+    "leagues": "Ligas"
+  },
+  "match": {
+    "probability": "Probabilidade",
+    "prediction": "Previsão",
+    "coefficient": "Odd",
+    "ev": "EV",
+    "homeWin": "Casa",
+    "draw": "Empate",
+    "awayWin": "Fora",
+    "over": "Mais de",
+    "under": "Menos de",
+    "btts": "BTTS",
+    "dch": "Dupla chance"
+  },
+  "stats": {
+    "wins": "Acertos",
+    "roi": "ROI",
+    "profit": "Lucro",
+    "total": "Total",
+    "winRate": "Taxa de acerto"
+  },
+  "standings": {
+    "position": "#",
+    "team": "Time",
+    "played": "J",
+    "won": "V",
+    "drawn": "E",
+    "lost": "D",
+    "goalsFor": "GP",
+    "goalsAgainst": "GC",
+    "goalDiff": "SG",
+    "points": "Pts",
+    "form": "Forma"
+  },
+  "news": {
+    "categories": {
+      "preview": "Pré-jogo",
+      "review": "Pós-jogo",
+      "injury": "Lesões",
+      "transfer": "Transferências",
+      "standings": "Classificação"
+    }
+  },
+  "about": {
+    "heading": "Sobre Football Value Bets",
+    "intro": "FVB é uma plataforma de previsões de futebol com IA que utiliza modelos estatísticos e aprendizado de máquina para encontrar apostas de valor nas principais ligas europeias.",
+    "howItWorksTitle": "Como funcionam as previsões",
+    "step1Name": "Coleta de dados",
+    "step1Desc": "Jogos, odds, classificações e lesões de fontes profissionais",
+    "step2Name": "Cálculo de índices",
+    "step2Desc": "Ratings ELO, métricas de forma, médias móveis de xG",
+    "step3Name": "Ajuste do modelo",
+    "step3Desc": "Modelo probabilístico Dixon-Coles em modo dual: gols e xG",
+    "step4Name": "Previsões",
+    "step4Desc": "Meta-modelo de stacking combina sinais em probabilidades finais",
+    "step5Name": "Detecção de valor",
+    "step5Desc": "Comparação das probabilidades do modelo com odds das casas de apostas",
+    "step6Name": "Avaliação",
+    "step6Desc": "Acompanhamento de cada previsão, cálculo de ROI e calibração",
+    "leaguesTitle": "Ligas cobertas",
+    "leaguesText": "Premier League, La Liga, Serie A, Bundesliga, Ligue 1 e Primeira Liga.",
+    "technologyTitle": "Tecnologia",
+    "technologyText": "Construído com Python, FastAPI e PostgreSQL. Modelo probabilístico Dixon-Coles, sistema de ratings ELO com ajuste de vantagem em casa e ensemble de stacking para previsões finais. Todos os dados são processados automaticamente diariamente.",
+    "disclaimerTitle": "Aviso legal",
+    "disclaimerText": "Todas as informações são fornecidas apenas para fins educacionais e de entretenimento. Resultados passados não garantem resultados futuros. Não nos responsabilizamos por decisões financeiras tomadas com base em nossas previsões."
+  },
+  "footer": {
+    "disclaimer": "As informações são fornecidas apenas para fins educacionais. Não nos responsabilizamos por decisões financeiras.",
+    "copyright": "© {year} Football Value Bets"
+  }
+}

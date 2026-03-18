@@ -1,0 +1,33 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.pill:hover {
+  border-color: var(--border);
+  background: var(--bg-2);
+}
+
+.logo {
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.name {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.country {
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+  margin-left: auto;
+}
