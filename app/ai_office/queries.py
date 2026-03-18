@@ -625,6 +625,19 @@ async def save_news_article(
     return article_id
 
 
+async def publish_news_article(session: AsyncSession, article_id: int) -> None:
+    """Mark a news article as published (set status + published_at)."""
+    await session.execute(
+        text("""
+            UPDATE news_articles
+            SET status = 'published', published_at = now()
+            WHERE id = :id AND status != 'published'
+        """),
+        {"id": article_id},
+    )
+    await session.commit()
+
+
 async def fetch_recent_news(
     session: AsyncSession, limit: int = 10, category: str | None = None
 ) -> list[dict[str, Any]]:

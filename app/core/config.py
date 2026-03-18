@@ -90,9 +90,37 @@ class Settings(BaseSettings):
     ai_office_news_cron: str = Field("0 * * * *", alias="AI_OFFICE_NEWS_CRON")
     ai_office_researcher_cron: str = Field("0 10 * * 0", alias="AI_OFFICE_RESEARCHER_CRON")
     ai_office_news_feeds: str = Field(
+        # England (3)
         "https://feeds.bbci.co.uk/sport/football/rss.xml,"
         "https://www.theguardian.com/football/rss,"
-        "https://www.espn.com/espn/rss/soccer/news",
+        "https://www.espn.com/espn/rss/soccer/news,"
+        "https://www.skysports.com/rss/11095,"
+        # Spain — La Liga (3)
+        "https://www.football-espana.net/feed,"
+        "https://e00-marca.uecdn.es/rss/futbol.xml,"
+        "https://www.mundodeportivo.com/feed/rss/futbol,"
+        # Italy — Serie A (3)
+        "https://www.football-italia.net/feed,"
+        "https://www.gazzetta.it/dynamic-feed/rss/section/Calcio.xml,"
+        "https://www.corrieredellosport.it/rss/calcio,"
+        # Germany — Bundesliga + national team (3)
+        "https://newsfeed.kicker.de/news/bundesliga,"
+        "https://newsfeed.kicker.de/news/nationalmannschaft,"
+        "https://newsfeed.kicker.de/news/fussball,"
+        # France — Ligue 1 (2)
+        "https://dwh.lequipe.fr/api/edito/rss?path=/Football/Ligue-1/,"
+        "https://rmcsport.bfmtv.com/rss/football/,"
+        # Portugal — Primeira Liga (2)
+        "https://www.record.pt/rss,"
+        "https://maisfutebol.iol.pt/rss,"
+        # European cups (3)
+        "https://newsfeed.kicker.de/news/champions-league,"
+        "https://newsfeed.kicker.de/news/europa-league,"
+        "https://newsfeed.kicker.de/news/europa-conference-league,"
+        # Transfers + multi-league (3)
+        "https://www.transfermarkt.co.uk/rss/news,"
+        "https://www.90min.com/posts.rss,"
+        "https://www.fourfourtwo.com/feeds/all",
         alias="AI_OFFICE_NEWS_FEEDS",
     )
 
